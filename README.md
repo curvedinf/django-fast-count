@@ -1,52 +1,80 @@
+from datetime import timedelta
+
 # django-fast-count
-Fast model.count() implementation for large tables
+Fast `queryset.count()` implementation for large tables.
 
-.. These are examples of badges you might want to add to your README:
-   please update the URLs accordingly
+## Summary
 
-    .. image:: https://api.cirrus-ci.com/github/<USER>/django-fast-count.svg?branch=main
-        :alt: Built Status
-        :target: https://cirrus-ci.com/github/<USER>/django-fast-count
-    .. image:: https://readthedocs.org/projects/django-fast-count/badge/?version=latest
-        :alt: ReadTheDocs
-        :target: https://django-fast-count.readthedocs.io/en/stable/
-    .. image:: https://img.shields.io/coveralls/github/<USER>/django-fast-count/main.svg
-        :alt: Coveralls
-        :target: https://coveralls.io/r/<USER>/django-fast-count
-    .. image:: https://img.shields.io/pypi/v/django-fast-count.svg
-        :alt: PyPI-Server
-        :target: https://pypi.org/project/django-fast-count/
-    .. image:: https://img.shields.io/conda/vn/conda-forge/django-fast-count.svg
-        :alt: Conda-Forge
-        :target: https://anaconda.org/conda-forge/django-fast-count
-    .. image:: https://pepy.tech/badge/django-fast-count/month
-        :alt: Monthly Downloads
-        :target: https://pepy.tech/project/django-fast-count
-    .. image:: https://img.shields.io/twitter/url/http/shields.io.svg?style=social&label=Twitter
-        :alt: Twitter
-        :target: https://twitter.com/django-fast-count
+For most databases, when a table begins to exceed several million rows,
+the performance of the default `queryset.count()` implementation begins to be 
+poor. Sometimes it is so poor that a count is the slowest query in a view by 
+several orders of magnitude.
 
-.. image:: https://img.shields.io/badge/-PyScaffold-005CA0?logo=pyscaffold
-    :alt: Project generated with PyScaffold
-    :target: https://pyscaffold.org/
+This package provides a fast, plug-and-play, database agnostic count implementation.
+The implementation is based on background caching of counts.
 
-|
+## Installation
 
-=================
-django-fast-count
-=================
+```bash
+pip install django-fast-count
+```
 
+```python
+# settings.py
 
-    Add a short description here!
+INSTALLED_APPS = [
+    # ...
+    'contenttypes',
+    'django_fast_count',
+]
+```
 
+```bash
+python manage.py migrate
+```
 
-A longer description of your project goes here...
+## Usage
+
+```python
+from datetime import timedelta
+
+from django.db.models import Model, BooleanField
+from django_fast_count import FastCountModelManager
 
 
-.. _pyscaffold-notes:
+class YourModel(Model):
+    your_field = BooleanField(default=False)
 
-Note
-====
+    # By default, only .all() is precached
+    objects = FastCountModelManager(
+        precache_count_every=timedelta(hours=1), # Defaults to 10 minutes
+        cache_counts_larger_than=100_000, # Defaults to 1,000,000
+        expire_cached_counts_after=timedelta(hours=1), # Defaults to 10 minutes
+    )
 
-This project has been set up using PyScaffold 4.6. For details and usage
-information on PyScaffold see https://pyscaffold.org/.
+    # To cache additional querysets, override the `fast_count_querysets`
+    def fast_count_querysets(self):
+        return [
+            self.objects.filter(your_field=True),
+            self.objects.filter(your_field=False),
+        ]
+```
+
+## FastCountModelManager
+
+The `FastCountModelManager` is a subclass of the default django `ModelManager` that 
+overrides `.count()` to use utilize cached counts. It has two main caching mechanisms:
+
+1. Precaching of select `.count()` queries every specified interval
+2. Retroactive caching of any `.count()` queries that return a count over a threshold
+
+It has 3 initialization parameters:
+
+1. `precache_count_every` - The frequency at which to precache select `.count()` queries
+2. `cache_counts_larger_than` - The minimum count at which to retroactively cache `.count()` queries
+3. `expire_cached_counts_after` - The frequency at which to expire cached `.count()` queries
+
+By default, `FastCountModelManager` will only precache `.all()` queries. To specify additional
+QuerySets to precache, implement a `fast_count_querysets` method on your model that returns a 
+list of QuerySets. Each of those QuerySets will be counted every `precache_count_every` and cached
+for use on future matching `.count()` queries.
