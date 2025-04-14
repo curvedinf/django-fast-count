@@ -53,10 +53,11 @@ class YourModel(Model):
     )
 
     # To cache additional querysets, override the `fast_count_querysets`
-    def fast_count_querysets(self):
+    @classmethod
+    def fast_count_querysets(cls):
         return [
-            self.objects.filter(your_field=True),
-            self.objects.filter(your_field=False),
+            cls.objects.filter(your_field=True),
+            cls.objects.filter(your_field=False),
         ]
 ```
 
