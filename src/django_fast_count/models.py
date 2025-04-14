@@ -33,21 +33,17 @@ class FastCount(models.Model):
         db_index=True,
         help_text="When this cached count should expire.",
     )
+    is_precached = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="Whether the count was pre-cached or retroactively cached.",
+    )
 
     class Meta:
         # Ensure uniqueness for a given model, manager, and queryset hash
         unique_together = ("content_type", "manager_name", "queryset_hash")
         verbose_name = "Fast Count Cache Entry"
         verbose_name_plural = "Fast Count Cache Entries"
-        # Add an index for faster lookups based on expiry
-        indexes = [
-            models.Index(fields=["expires_at"]),
-        ]
 
     def __str__(self):
-        return f"{self.content_type.model_class().__name__} ({self.manager_name}) [{self.queryset_hash[:8]}...] Count: {self.count}"
-
-    @property
-    def is_expired(self):
-        """Checks if the cached count has expired."""
-        return timezone.now() > self.expires_at
+        return f"{self.content_type} ({self.manager_name}) [{self.queryset_hash[:8]}...]"

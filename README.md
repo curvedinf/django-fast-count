@@ -78,3 +78,16 @@ By default, `FastCountModelManager` will only precache `.all()` queries. To spec
 QuerySets to precache, implement a `fast_count_querysets` method on your model that returns a 
 list of QuerySets. Each of those QuerySets will be counted every `precache_count_every` and cached
 for use on future matching `.count()` queries.
+
+## Precaching Process
+
+Precaching of counts is performed regularly by a management command that is called from a forked
+process. The forked process is started every `precache_count_every` from any `.count()` query
+performed on the model.
+
+Typically, this means that precaching is performed in a background task on your web server,
+so if your django deploy is serverless, the precaching process may end early and not function
+properly.
+
+Deadlock control over the precaching scheduler is implemented with atomic transactions so that
+multiple `.count()` queries do not simultaneously run the precaching process.
