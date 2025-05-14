@@ -1,0 +1,9 @@
+setuptools
+pytest
+pytest-cov
+pytest-django
+pre-commit
+black
+flake8
+tox
+django-debug-toolbar
