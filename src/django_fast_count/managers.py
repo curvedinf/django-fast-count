@@ -1,7 +1,7 @@
 import hashlib
 import os
 import time
-from datetime import timedelta, datetime
+from datetime import timedelta
 from django.core.cache import cache
 from django.db import models, connections
 from django.db.models.query import QuerySet

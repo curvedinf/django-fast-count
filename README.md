@@ -1,7 +1,5 @@
-from datetime import timedelta
-
 # django-fast-count
-Fast `queryset.count()` implementation for large tables.
+Fast Django `queryset.count()` implementation for large tables.
 
 ## Summary
 
@@ -24,7 +22,7 @@ pip install django-fast-count
 
 INSTALLED_APPS = [
     # ...
-    'contenttypes',
+    'django.contrib.contenttypes',
     'django_fast_count',
 ]
 ```
@@ -39,7 +37,7 @@ python manage.py migrate
 from datetime import timedelta
 
 from django.db.models import Model, BooleanField
-from django_fast_count import FastCountModelManager
+from django_fast_count.managers import FastCountModelManager
 
 
 class YourModel(Model):
