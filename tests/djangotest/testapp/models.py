@@ -13,7 +13,7 @@ class TestModel(models.Model):
 
     objects = FastCountModelManager(
         precache_count_every=timedelta(minutes=1),
-        cache_counts_larger_than=1_000,
+        cache_counts_larger_than=1000,
         expire_cached_counts_after=timedelta(minutes=1),
     )
 

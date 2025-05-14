@@ -1,32 +1,33 @@
 # Django Fast Count
 
-[![PyPI](https://img.shields.io/pypi/v/dir-assistant)](https://pypi.org/project/dir-assistant/)
-[![GitHub license](https://img.shields.io/github/license/curvedinf/dir-assistant)](LICENSE)
-[![GitHub last commit](https://img.shields.io/github/last-commit/curvedinf/dir-assistant)](https://github.com/curvedinf/dir-assistant/commits/main)
-[![PyPI - Downloads](https://img.shields.io/pypi/dm/dir-assistant)](https://pypi.org/project/dir-assistant/)
-[![GitHub stars](https://img.shields.io/github/stars/curvedinf/dir-assistant)](https://github.com/curvedinf/dir-assistant/stargazers)
+[![PyPI](https://img.shields.io/pypi/v/django-fast-count)](https://pypi.org/project/django-fast-count/)
+[![GitHub license](https://img.shields.io/github/license/curvedinf/django-fast-count)](LICENSE)
+[![GitHub last commit](https://img.shields.io/github/last-commit/curvedinf/django-fast-count)](https://github.com/curvedinf/django-fast-count/commits/main)
+[![PyPI - Downloads](https://img.shields.io/pypi/dm/django-fast-count)](https://pypi.org/project/django-fast-count/)
+[![GitHub stars](https://img.shields.io/github/stars/curvedinf/django-fast-count)](https://github.com/curvedinf/django-fast-count/stargazers)
 [![Ko-fi Link](kofi.webp)](https://ko-fi.com/A0A31B6VB6)
 
-A fast Django `.count()` for large tables.
+A fast [Django](https://djangoproject.com) `.count()` implementation for large tables.
 
 ## Summary
 
 For most databases, when a table begins to exceed several million rows,
-the performance of the default `queryset.count()` implementation begins to be 
+the performance of the default `QuerySet.count()` implementation begins to be 
 poor. Sometimes it is so poor that a count is the slowest query in a view by 
 several orders of magnitude. Since the Django admin app uses `.count()` on every
 list page, this can be annoying at best or unusable at worst.
 
 This package provides a fast, plug-and-play, database agnostic count 
-implementation based on caching. To use it, you just need to have 
+implementation. To use it, you just need to have 
 `django-fast-count` installed and then override your Model's 
 `ModelManager` with `FastCountModelManager`.
 
-After `FastCountModelManager` is on your Model, retroactive caching will
-be enabled immediately. To precache counts you use regularly (see below),
-run `precache_fast_counts` in a regularly scheduled task every minute. 
-It will only precache a count after its cache entry expires, so it 
-won't hog resources.
+After `FastCountModelManager` is on your Model, fast counts are immediately
+activate. Precaching for all `.count()` queries is triggered automatically
+on every `.count()` query in a forked background process.
+
+To proactively precache and clean expired counts, run `precache_fast_counts`
+in a regularly scheduled task.
 
 ## Installation
 
@@ -86,8 +87,9 @@ overrides `.count()` to use utilize cached counts. It has two main caching mecha
 
 It has 3 initialization parameters:
 
-1. `precache_count_every` - The frequency at which to precache select `.count()` queries
-2. `cache_counts_larger_than` - The minimum count at which to retroactively cache `.count()` queries
+1. `precache_count_every` - The frequency with which to precache select `.count()` queries
+2. `cache_counts_larger_than` - The minimum count at which to retroactively cache all other
+`.count()` queries
 3. `expire_cached_counts_after` - The frequency at which to expire cached `.count()` queries
 
 By default, `FastCountModelManager` will only precache `.all()` queries. To specify additional
@@ -107,10 +109,3 @@ properly.
 
 Deadlock control over the precaching scheduler is implemented with atomic transactions so that
 multiple `.count()` queries do not simultaneously run the precaching process.
-
-## Notes
-
-After reading the source you may note "But wait, this doesn't use the cache at all!"
-This is an intentional decision. Because normally `.count()` lives on the database,
-its `FastCount` cache entry also lives on the database to prevent unexpected complications with
-setup.
