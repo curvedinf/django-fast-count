@@ -55,16 +55,19 @@ def test_precache_command_manager_discovery_fallback(capsys, monkeypatch):
     # Use the sacrificial FallbackDiscoveryTestModel to avoid altering TestModel._meta
     # and causing teardown issues.
 
-    # 1. Ensure managers_map is empty for FallbackDiscoveryTestModel
-    monkeypatch.setattr(FallbackDiscoveryTestModel._meta, "managers_map", {})
-
-    # 2. Create a FastCountModelManager instance and set its model
+    # 1. Create a FastCountModelManager instance and set its model
     mock_objects_manager = FastCountModelManager()
     monkeypatch.setattr(mock_objects_manager, "model", FallbackDiscoveryTestModel)
 
-    # 3. Replace FallbackDiscoveryTestModel.objects with our manager instance
-    #    monkeypatch will handle restoration.
+    # 2. Monkeypatch FallbackDiscoveryTestModel.objects *before* altering its _meta.managers_map.
+    #    This allows monkeypatch to correctly save the original descriptor.
+    #    The ManagerDescriptor.__get__ for FallbackDiscoveryTestModel.objects needs a valid
+    #    managers_map at the time of this setattr to retrieve the original value.
     monkeypatch.setattr(FallbackDiscoveryTestModel, "objects", mock_objects_manager)
+
+    # 3. Now, set FallbackDiscoveryTestModel._meta.managers_map to {} to trigger the fallback
+    #    logic in the command. monkeypatch will ensure this is reverted after the test.
+    monkeypatch.setattr(FallbackDiscoveryTestModel._meta, "managers_map", {})
 
     ContentType.objects.get_for_model(FallbackDiscoveryTestModel)  # Ensure CT type exists
 
