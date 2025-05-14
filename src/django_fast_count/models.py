@@ -6,6 +6,7 @@ class FastCount(models.Model):
     """
     Stores cached counts for specific model querysets.
     """
+
     content_type = models.ForeignKey(
         ContentType,
         on_delete=models.CASCADE,
@@ -17,7 +18,7 @@ class FastCount(models.Model):
         help_text="The name of the manager on the model (e.g., 'objects').",
     )
     queryset_hash = models.CharField(
-        max_length=32, # MD5 hash length
+        max_length=32,  # MD5 hash length
         db_index=True,
         help_text="MD5 hash representing the specific queryset.",
     )
@@ -45,4 +46,6 @@ class FastCount(models.Model):
         verbose_name_plural = "Fast Count Cache Entries"
 
     def __str__(self):
-        return f"{self.content_type} ({self.manager_name}) [{self.queryset_hash[:8]}...]"
+        return (
+            f"{self.content_type} ({self.manager_name}) [{self.queryset_hash[:8]}...]"
+        )

@@ -20,7 +20,7 @@ class Command(BaseCommand):
         for model in all_models:
             # Use _meta.managers_map which is safer for finding all managers
             managers = getattr(model._meta, "managers_map", {})
-            if not managers and hasattr(model, "objects"): # Fallback for simpler cases
+            if not managers and hasattr(model, "objects"):  # Fallback for simpler cases
                 managers = {"objects": model.objects}
 
             found_fast_manager_on_model = False
@@ -38,13 +38,21 @@ class Command(BaseCommand):
 
                     try:
                         # The manager instance needs access to its name on the model
-                        results = manager_instance.precache_counts(manager_name=manager_name)
-                        self.stdout.write(f"  Precached counts for {len(results)} querysets:")
+                        results = manager_instance.precache_counts(
+                            manager_name=manager_name
+                        )
+                        self.stdout.write(
+                            f"  Precached counts for {len(results)} querysets:"
+                        )
                         for key, result in results.items():
                             if isinstance(result, int):
                                 self.stdout.write(f"    - Hash {key[:8]}...: {result}")
                             else:
-                                self.stdout.write(self.style.WARNING(f"    - Hash {key[:8]}...: {result}"))
+                                self.stdout.write(
+                                    self.style.WARNING(
+                                        f"    - Hash {key[:8]}...: {result}"
+                                    )
+                                )
                     except Exception as e:
                         self.stderr.write(
                             self.style.ERROR(
@@ -81,9 +89,7 @@ class Command(BaseCommand):
         if num_expired > 0:
             expired_counts.delete()
             self.stdout.write(
-                self.style.SUCCESS(
-                    f"Deleted {num_expired} expired FastCount entries."
-                )
+                self.style.SUCCESS(f"Deleted {num_expired} expired FastCount entries.")
             )
         else:
             self.stdout.write(self.style.WARNING("No FastCount entries were expired."))
