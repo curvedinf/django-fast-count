@@ -16,7 +16,6 @@ DEFAULT_EXPIRE_CACHED_COUNTS_AFTER = timedelta(minutes=10)
 # Lock timeout slightly longer than default precache interval to prevent stale locks
 # but short enough to recover if a process dies.
 DEFAULT_PRECACHE_LOCK_TIMEOUT_SECONDS = int(DEFAULT_PRECACHE_COUNT_EVERY.total_seconds() * 1.5)
-
 # Environment variable to disable forking, useful for testing
 DISABLE_FORK_ENV_VAR = "DJANGO_FAST_COUNT_DISABLE_FORK_FOR_TESTING"
 
@@ -27,6 +26,14 @@ class FastCountQuerySet(QuerySet):
     """
     # The manager instance will be attached here by FastCountModelManager.get_queryset
     manager = None
+
+    def _clone(self, **kwargs):
+        """
+        Ensure that the custom 'manager' attribute is propagated when cloning.
+        """
+        clone = super()._clone(**kwargs)
+        clone.manager = self.manager
+        return clone
 
     def _get_manager_name(self):
         """Tries to find the name this manager instance is assigned to on the model."""
@@ -114,6 +121,7 @@ class FastCountQuerySet(QuerySet):
         if actual_count >= self.manager.cache_counts_larger_than:
             expiry_time = now + self.manager.expire_cached_counts_after
             expires_seconds = self.manager.expire_cached_counts_after.total_seconds()
+
             # Store/update in DB cache
             try:
                  FastCount.objects.using(self.db).update_or_create(
@@ -130,10 +138,13 @@ class FastCountQuerySet(QuerySet):
             except Exception as e:
                  # Log error - e.g., database constraint violation, connection issue
                  print(f"Error retroactively caching count in DB for {self.model.__name__} ({cache_key}): {e}")
+
             # Store/update in Django cache
             if expires_seconds > 0:
                 cache.set(cache_key, actual_count, int(expires_seconds))
+
         return actual_count
+
 
 class FastCountModelManager(models.Manager):
     """
@@ -154,6 +165,7 @@ class FastCountModelManager(models.Manager):
         self.precache_count_every = precache_count_every if precache_count_every is not None else DEFAULT_PRECACHE_COUNT_EVERY
         self.cache_counts_larger_than = cache_counts_larger_than if cache_counts_larger_than is not None else DEFAULT_CACHE_COUNTS_LARGER_THAN
         self.expire_cached_counts_after = expire_cached_counts_after if expire_cached_counts_after is not None else DEFAULT_EXPIRE_CACHED_COUNTS_AFTER
+
         # Ensure lock timeout is reasonable relative to precache frequency
         if precache_lock_timeout is None:
              self.precache_lock_timeout = max(300, int(self.precache_count_every.total_seconds() * 1.5)) # At least 5 mins
@@ -202,6 +214,7 @@ class FastCountModelManager(models.Manager):
         by the model's `fast_count_querysets` method (if defined).
         Expects `fast_count_querysets` to be defined on the model, potentially
         as an instance method, classmethod, or staticmethod.
+
         ```python
         # As instance method (receives self=model instance, but usually not needed)
         # Use `self.__class__.objects` or specific manager name if needed
@@ -267,8 +280,8 @@ class FastCountModelManager(models.Manager):
         expiry_time = now + self.expire_cached_counts_after
         expires_seconds = self.expire_cached_counts_after.total_seconds()
         results = {}
-
         print(f"Precaching started for {model_ct} ({manager_name}) at {now.isoformat()}") # Add logging
+
         for qs in querysets:
             # Regenerate cache key using this manager's context
             cache_key = self._get_cache_key(qs)
@@ -290,9 +303,11 @@ class FastCountModelManager(models.Manager):
                         "is_precached": True, # Mark as precached
                     },
                 )
+
                 # Store/update in Django cache
                 if expires_seconds > 0:
                     cache.set(cache_key, actual_count, int(expires_seconds))
+
                 results[cache_key] = actual_count
                 print(f"  - Precached {model_ct} ({manager_name}) hash {cache_key[:8]}...: {actual_count}")
             except Exception as e:
@@ -325,6 +340,7 @@ class FastCountModelManager(models.Manager):
         # Try to acquire lock (common for both forked and sync test mode)
         # In sync test mode, this mainly prevents re-entry if called rapidly in a test.
         lock_acquired = cache.add(lock_key, "running", self.precache_lock_timeout)
+
         if not lock_acquired:
              # Another process is already handling precaching (or recently finished/failed)
              # Or, in sync mode, another call within the test might have acquired it.
