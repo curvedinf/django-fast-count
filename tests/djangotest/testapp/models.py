@@ -1,7 +1,7 @@
 import uuid
 from datetime import timedelta
 from random import choice
-from django.db import models # Changed from specific imports to general 'models'
+from django.db import models
 from django_fast_count.managers import FastCountModelManager
 
 def get_random_boolean():
@@ -24,7 +24,6 @@ class TestModel(models.Model):
             cls.objects.filter(flag=False),
         ]
 
-# Models from test_edge_cases_and_errors.py
 class ModelWithBadFastCountQuerysets(models.Model):
     objects = FastCountModelManager()
     @classmethod
