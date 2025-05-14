@@ -18,61 +18,61 @@ from django.apps import apps as django_apps  # For patching get_models
 # Pytest marker for DB access
 pytestmark = pytest.mark.django_db
 
-
 @pytest.fixture(autouse=True)
 def clear_state_and_env():
     """Ensures a clean state for each test."""
     cache.clear()
     FastCount.objects.all().delete()
     TestModel.objects.all().delete()
-
     original_fork_setting = os.environ.pop(DISABLE_FORK_ENV_VAR, None)
     yield
     cache.clear()
     FastCount.objects.all().delete()
     TestModel.objects.all().delete()
-
     if original_fork_setting is not None:
         os.environ[DISABLE_FORK_ENV_VAR] = original_fork_setting
     elif DISABLE_FORK_ENV_VAR in os.environ:
         del os.environ[DISABLE_FORK_ENV_VAR]
 
-
 def create_test_models(count=1, flag=True):
     TestModel.objects.bulk_create([TestModel(flag=flag) for _ in range(count)])
 
-
 # --- Tests for src/django_fast_count/management/commands/precache_fast_counts.py ---
+
+# Define a sacrificial model for the manager discovery fallback test
+class FallbackDiscoveryTestModel(django_models.Model):
+    objects = django_models.Manager() # Will be replaced
+
+    class Meta:
+        app_label = "testapp_fb_discover"
+        managed = False
+
 def test_precache_command_manager_discovery_fallback(capsys, monkeypatch):
     """
     Covers line 21 in precache_fast_counts.py:
     Fallback manager discovery: `if not managers and hasattr(model, "objects")`
     """
-    # Set TestModel._meta.managers_map to {} to trigger the fallback.
-    # monkeypatch will ensure this is reverted after the test.
-    monkeypatch.setattr(TestModel._meta, "managers_map", {})
+    # Use the sacrificial FallbackDiscoveryTestModel to avoid altering TestModel._meta
+    # and causing teardown issues.
 
-    # Create a real FastCountModelManager instance.
-    # This instance will be temporarily assigned to TestModel.objects.
-    # The command's fallback logic `managers = {"objects": model.objects}`
-    # will then retrieve this instance directly, bypassing the ManagerDescriptor
-    # that would fail due to the empty managers_map.
+    # 1. Ensure managers_map is empty for FallbackDiscoveryTestModel
+    monkeypatch.setattr(FallbackDiscoveryTestModel._meta, "managers_map", {})
+
+    # 2. Create a FastCountModelManager instance and set its model
     mock_objects_manager = FastCountModelManager()
-    # The manager's precache_counts method needs self.model.
-    monkeypatch.setattr(mock_objects_manager, "model", TestModel)
+    monkeypatch.setattr(mock_objects_manager, "model", FallbackDiscoveryTestModel)
 
-    # Replace the TestModel.objects descriptor with our actual manager instance.
-    # monkeypatch will restore the original descriptor after the test.
-    monkeypatch.setattr(TestModel, "objects", mock_objects_manager)
+    # 3. Replace FallbackDiscoveryTestModel.objects with our manager instance
+    #    monkeypatch will handle restoration.
+    monkeypatch.setattr(FallbackDiscoveryTestModel, "objects", mock_objects_manager)
 
-    ContentType.objects.get_for_model(TestModel)  # Ensure CT type exists for TestModel
+    ContentType.objects.get_for_model(FallbackDiscoveryTestModel)  # Ensure CT type exists
 
-    with patch("django.apps.apps.get_models", return_value=[TestModel]):
+    with patch("django.apps.apps.get_models", return_value=[FallbackDiscoveryTestModel]):
         call_command("precache_fast_counts")
-    captured = capsys.readouterr()
 
-    assert f"Processing: {TestModel._meta.app_label}.{TestModel.__name__} (manager: 'objects')" in captured.out
-    # No explicit restoration needed here, monkeypatch handles it for both attributes.
+    captured = capsys.readouterr()
+    assert f"Processing: {FallbackDiscoveryTestModel._meta.app_label}.{FallbackDiscoveryTestModel.__name__} (manager: 'objects')" in captured.out
 
 
 def test_precache_command_general_error_in_manager_processing(capsys, monkeypatch):
@@ -81,17 +81,16 @@ def test_precache_command_general_error_in_manager_processing(capsys, monkeypatc
     General error during `manager_instance.precache_counts()`.
     """
     create_test_models(1)
-
     mock_manager_precache = MagicMock(side_effect=Exception("Global Precache Kaboom!"))
     monkeypatch.setattr(TestModel.objects, "precache_counts", mock_manager_precache)
+
     stderr_capture = StringIO()
     call_command("precache_fast_counts", stdout=StringIO(), stderr=stderr_capture)  # Capture stderr
-
     err_output = stderr_capture.getvalue()
     assert f"Error precaching for {TestModel._meta.app_label}.{TestModel.__name__} ('objects'): Global Precache Kaboom!" in err_output
 
-
 # --- Tests for src/django_fast_count/managers.py ---
+
 def test_fcqs_get_manager_name_no_manager_or_model_attr(capsys):
     """
     Covers line 44 in managers.py (FastCountQuerySet._get_manager_name):
@@ -113,11 +112,6 @@ def test_fcqs_get_manager_name_no_manager_or_model_attr(capsys):
     # Create a mock manager that doesn't have a 'model' attribute when checked by hasattr
     mock_manager_without_model = MagicMock(spec=FastCountModelManager)  # Use spec for isinstance checks
     # To truly simulate no 'model' attribute for hasattr, we ensure it's not present.
-    # If 'model' was part of the spec and MagicMock auto-creates attributes from spec,
-    # we might need `del mock_manager_without_model.model`.
-    # However, for hasattr to return False, the attribute must simply not exist or its getter raise AttributeError.
-    # For a MagicMock, if 'model' is not accessed, it won't be created unless autospecced with it.
-    # Let's explicitly delete it if it might exist from spec.
     if hasattr(mock_manager_without_model, "model"):
         del mock_manager_without_model.model  # Ensure 'model' attribute is missing
     qs_manager_no_model.manager = mock_manager_without_model
@@ -125,71 +119,74 @@ def test_fcqs_get_manager_name_no_manager_or_model_attr(capsys):
     manager_name_2 = qs_manager_no_model._get_manager_name()
     assert manager_name_2 == "objects"
     captured_2 = capsys.readouterr()
-    # The warning message might be slightly different if model name isn't found,
-    # but the core "Could not determine manager name" part is key.
-    # The current implementation gets model name from `self.model.__name__` which is fine.
     assert f"Warning: Could not determine manager name for {TestModel.__name__}. Falling back to 'objects'." in captured_2.out
 
 
 def test_fcqs_count_db_cache_generic_error(monkeypatch, capsys):
     """
-    Covers line 69 in managers.py (FastCountQuerySet.count):
+    Covers line 93 in managers.py (FastCountQuerySet.count):
     Error print when FastCount.objects.get() raises a generic Exception.
+    (Old line number was ~69)
     """
     create_test_models(5)  # Actual count is 5
-
-    # Prevent maybe_trigger_precache from running and polluting capsys
     monkeypatch.setattr(TestModel.objects, "maybe_trigger_precache", lambda *args, **kwargs: None)
-
     cache_key = TestModel.objects._get_cache_key(TestModel.objects.all())
-    cache.delete(cache_key)  # Ensure Django cache is empty
-    with patch("django_fast_count.models.FastCount.objects.get", side_effect=Exception("DB Cache Read Error")):
+    cache.delete(cache_key)
+
+    original_qs_get = django_models.query.QuerySet.get
+    def new_qs_get(qs_self, *args, **kwargs):
+        if qs_self.model == FastCount: # Check if this QuerySet.get is for the FastCount model
+            raise Exception("DB Cache Read Error (patched)")
+        return original_qs_get(qs_self, *args, **kwargs) # Call original for other models
+
+    with patch("django.db.models.query.QuerySet.get", new=new_qs_get):
         assert TestModel.objects.count() == 5  # Should fall back to actual DB count
 
     captured = capsys.readouterr()
-    assert f"Error checking FastCount DB cache for {TestModel.__name__} ({cache_key}): DB Cache Read Error" in captured.out
-
+    assert f"Error checking FastCount DB cache for {TestModel.__name__} ({cache_key}): DB Cache Read Error (patched)" in captured.out
 
 def test_fcqs_count_retroactive_cache_db_error(monkeypatch, capsys):
     """
-    Covers lines 106-109 in managers.py (FastCountQuerySet.count):
+    Covers lines 125-126 in managers.py (FastCountQuerySet.count):
     Error print when FastCount.objects.update_or_create() for retroactive cache fails.
+    (Old line numbers were ~106-109)
     """
     create_test_models(10)  # Actual count 10
-    monkeypatch.setattr(TestModel.objects, "cache_counts_larger_than", 5)  # Trigger retroactive cache
-
-    # Prevent maybe_trigger_precache from running and polluting capsys
+    monkeypatch.setattr(TestModel.objects, "cache_counts_larger_than", 5)
     monkeypatch.setattr(TestModel.objects, "maybe_trigger_precache", lambda *args, **kwargs: None)
-
     cache_key = TestModel.objects._get_cache_key(TestModel.objects.all())
     cache.delete(cache_key)
     FastCount.objects.filter(queryset_hash=cache_key).delete()
-    with patch("django_fast_count.models.FastCount.objects.update_or_create",
-               side_effect=Exception("DB Retro Cache Write Error")):
-        assert TestModel.objects.count() == 10  # Count should still return actual
+
+    original_qs_uoc = django_models.query.QuerySet.update_or_create
+    def new_qs_uoc(qs_self, *args, **kwargs):
+        if qs_self.model == FastCount: # Check if this QuerySet.uoc is for the FastCount model
+            # Make sure this is the specific update_or_create we want to fail
+            # For this test, any uoc on FastCount model is fine to fail
+            raise Exception("DB Retro Cache Write Error (patched)")
+        return original_qs_uoc(qs_self, *args, **kwargs)
+
+    with patch("django.db.models.query.QuerySet.update_or_create", new=new_qs_uoc):
+        assert TestModel.objects.count() == 10
 
     captured = capsys.readouterr()
-    assert f"Error retroactively caching count in DB for {TestModel.__name__} ({cache_key}): DB Retro Cache Write Error" in captured.out
-    assert not FastCount.objects.filter(queryset_hash=cache_key).exists()  # No DB entry
+    assert f"Error retroactively caching count in DB for {TestModel.__name__} ({cache_key}): DB Retro Cache Write Error (patched)" in captured.out
+    assert not FastCount.objects.filter(queryset_hash=cache_key).exists()
 
 
 def test_fcmanager_init_precache_lock_timeout_types():
     """
-    Covers lines 138-140 in managers.py (FastCountModelManager.__init__):
+    Covers lines 140-145 in managers.py (FastCountModelManager.__init__):
     Initialization with timedelta and int for precache_lock_timeout.
+    (Old line numbers were ~138-140)
     """
-    # This test as written correctly covers lines 139-142 (new numbering may vary slightly).
-    # It tests initialization with timedelta, int, and default calculation.
-    # If coverage still reports these as missed, it might be a line numbering discrepancy
-    # or a subtle execution path not taken (e.g. if precache_lock_timeout=None was the *only* path).
-    # The existing test logic is sound for these lines.
     manager_td = FastCountModelManager(precache_lock_timeout=timedelta(seconds=120))
     assert manager_td.precache_lock_timeout == 120
 
     manager_int = FastCountModelManager(precache_lock_timeout=180)
     assert manager_int.precache_lock_timeout == 180
 
-    # Test default calculation based on precache_count_every
+    # Test default calculation (precache_lock_timeout=None)
     manager_default_short_every = FastCountModelManager(precache_count_every=timedelta(minutes=2))  # 120s
     # Expected: max(300, 120 * 1.5) = max(300, 180) = 300
     assert manager_default_short_every.precache_lock_timeout == 300
@@ -208,59 +205,51 @@ class ModelWithOtherTypeErrorInFCQ(django_models.Model):
         return sum(["not", "a", "list", "of", "querysets"])  # type: ignore
 
     class Meta:
-        app_label = "testapp_covimp_other_typeerror"  # Unique app_label
-        # Add `db_table` for clarity or to avoid clashes if model name is very generic
-        # db_table = "testapp_covimp_other_typeerror_table"
-        managed = False  # Important: tests should not create DB tables for this mock model
-
+        app_label = "testapp_covimp_other_typeerror"
+        managed = False
 
 def test_fcmanager_get_precache_querysets_other_typeerror(capsys):
     """
-    Covers lines 174-175 in managers.py (get_precache_querysets):
+    Covers lines 220-221 in managers.py (get_precache_querysets):
     Error print for a TypeError from fast_count_querysets not matching "missing 1 required".
+    (Old line numbers were ~174-175)
     """
     manager = ModelWithOtherTypeErrorInFCQ.objects
     querysets = manager.get_precache_querysets()
-
     assert len(querysets) == 1
     assert querysets[0].model == ModelWithOtherTypeErrorInFCQ
     assert not querysets[0].query.where  # .all()
 
     captured = capsys.readouterr()
     assert f"Error calling fast_count_querysets for {ModelWithOtherTypeErrorInFCQ.__name__}" in captured.out
-    # Check for part of the sum() TypeError message, which can vary slightly by Python version
-    # e.g. "unsupported operand type(s) for +: 'int' and 'str'" or "can only concatenate str (not \"int\") to str"
-    # or "must be str, not int"
     assert ("unsupported operand type(s)" in captured.out or
-            "can only concatenate str (not \"int\") to str" in captured.out or  # Py 3.x
-            "must be str, not int" in captured.out)  # Py 3.11+ for sum with strings
+            "can only concatenate str (not \"int\") to str" in captured.out or
+            "must be str, not int" in captured.out)
     assert "seems to be an instance method" not in captured.out
 
 
 @patch("os.fork")
 def test_fcmanager_maybe_trigger_precache_fork_oserror(mock_os_fork, monkeypatch, capsys):
     """
-    Covers lines 258-260 in managers.py (maybe_trigger_precache):
+    Covers lines 399-401 in managers.py (maybe_trigger_precache):
     Error print when os.fork() raises OSError.
-    (These are now lines ~399-401)
+    (Old line numbers were ~258-260)
     """
     if DISABLE_FORK_ENV_VAR in os.environ: del os.environ[DISABLE_FORK_ENV_VAR]
-
     mock_os_fork.side_effect = OSError("Fork failed spectacularly")
 
     manager = TestModel.objects
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = "objects"
-
     monkeypatch.setattr(manager, "precache_count_every", timedelta(seconds=1))
     last_run_key = manager._precache_last_run_key_template.format(ct_id=model_ct.id, manager=manager_name)
-    cache.set(last_run_key, 0)
+    cache.set(last_run_key, 0) # Ensure precache logic attempts to run
+
     manager.maybe_trigger_precache(manager_name=manager_name, model_ct=model_ct)
 
     captured = capsys.readouterr()
     assert f"Error forking/managing precache process for {model_ct} ({manager_name}): Fork failed spectacularly" in captured.out
     lock_key = manager._precache_lock_key_template.format(ct_id=model_ct.id, manager=manager_name)
-    # The lock should be cleared by the except OSError block
     assert cache.get(lock_key) is None
 
 
@@ -272,7 +261,6 @@ def test_fcmanager_maybe_trigger_precache_outer_exception(monkeypatch, capsys):
     manager = TestModel.objects
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = "objects"
-
     monkeypatch.setattr(manager, "precache_count_every", timedelta(seconds=1))
     last_run_key = manager._precache_last_run_key_template.format(ct_id=model_ct.id, manager=manager_name)
     cache.set(last_run_key, 0)  # Ensure the precache logic attempts to run
@@ -288,8 +276,4 @@ def test_fcmanager_maybe_trigger_precache_outer_exception(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert f"Unexpected error during precache trigger for {model_ct} ({manager_name}): Environ Get Kaboom" in captured.out
     lock_key = manager._precache_lock_key_template.format(ct_id=model_ct.id, manager=manager_name)
-    # The lock should be cleared by the final `except Exception` block's `cache.delete(lock_key)`
     assert cache.get(lock_key) is None
-
-    # Original Case 1 (error in cache.get for last_run_key) is removed as it doesn't hit the target lines.
-    # Original Case 2 (faulty_cache_add) also doesn't hit the target lines as the error is in cache.add call itself.
