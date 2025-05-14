@@ -3,6 +3,7 @@ import os
 import sys
 import subprocess
 
+
 def main():
     # Determine paths
     # The script itself is in the project root.
@@ -14,7 +15,7 @@ def main():
 
     # Prepare environment variables
     env = os.environ.copy()
-    
+
     # Set DJANGO_SETTINGS_MODULE for the test Django project
     # This refers to tests/djangotest/djangotest/settings.py
     env["DJANGO_SETTINGS_MODULE"] = "djangotest.settings"
@@ -26,7 +27,7 @@ def main():
     #    This is important if 'pip install -e .' hasn't been run or isn't fully effective.
     python_path_parts = [
         django_test_project_dir,  # For 'import djangotest.settings'
-        src_dir,                  # For 'import django_fast_count'
+        src_dir,  # For 'import django_fast_count'
     ]
     if "PYTHONPATH" in env:
         # Append existing PYTHONPATH if it's set
@@ -48,10 +49,11 @@ def main():
     # Execute pytest from the Django test project directory
     # This is often recommended by pytest-django, as it helps find manage.py
     process = subprocess.Popen(command, cwd=django_test_project_dir, env=env)
-    process.wait() # Wait for the pytest process to complete
-    
+    process.wait()  # Wait for the pytest process to complete
+
     # Exit with the same return code as pytest
     sys.exit(process.returncode)
+
 
 if __name__ == "__main__":
     main()

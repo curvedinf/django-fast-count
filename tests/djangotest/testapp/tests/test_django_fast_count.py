@@ -6,7 +6,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.management import call_command
 from unittest.mock import patch, ANY
 
-from tests.djangotest.testapp.models import TestModel
+from testapp.models import TestModel
 from django_fast_count.models import FastCount
 from django_fast_count.managers import FastCountModelManager
 
