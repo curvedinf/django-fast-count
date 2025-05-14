@@ -1,15 +1,32 @@
-# django-fast-count
-Fast Django `queryset.count()` implementation for large tables.
+# Django Fast Count
+
+[![PyPI](https://img.shields.io/pypi/v/dir-assistant)](https://pypi.org/project/dir-assistant/)
+[![GitHub license](https://img.shields.io/github/license/curvedinf/dir-assistant)](LICENSE)
+[![GitHub last commit](https://img.shields.io/github/last-commit/curvedinf/dir-assistant)](https://github.com/curvedinf/dir-assistant/commits/main)
+[![PyPI - Downloads](https://img.shields.io/pypi/dm/dir-assistant)](https://pypi.org/project/dir-assistant/)
+[![GitHub stars](https://img.shields.io/github/stars/curvedinf/dir-assistant)](https://github.com/curvedinf/dir-assistant/stargazers)
+[![Ko-fi Link](kofi.webp)](https://ko-fi.com/A0A31B6VB6)
+
+A fast Django `.count()` for large tables.
 
 ## Summary
 
 For most databases, when a table begins to exceed several million rows,
 the performance of the default `queryset.count()` implementation begins to be 
 poor. Sometimes it is so poor that a count is the slowest query in a view by 
-several orders of magnitude.
+several orders of magnitude. Since the Django admin app uses `.count()` on every
+list page, this can be annoying at best or unusable at worst.
 
-This package provides a fast, plug-and-play, database agnostic count implementation.
-The implementation is based on background caching of counts.
+This package provides a fast, plug-and-play, database agnostic count 
+implementation based on caching. To use it, you just need to have 
+`django-fast-count` installed and then override your Model's 
+`ModelManager` with `FastCountModelManager`.
+
+After `FastCountModelManager` is on your Model, retroactive caching will
+be enabled immediately. To precache counts you use regularly (see below),
+run `precache_fast_counts` in a regularly scheduled task every minute. 
+It will only precache a count after its cache entry expires, so it 
+won't hog resources.
 
 ## Installation
 
@@ -90,3 +107,10 @@ properly.
 
 Deadlock control over the precaching scheduler is implemented with atomic transactions so that
 multiple `.count()` queries do not simultaneously run the precaching process.
+
+## Notes
+
+After reading the source you may note "But wait, this doesn't use the cache at all!"
+This is an intentional decision. Because normally `.count()` lives on the database,
+its `FastCount` cache entry also lives on the database to prevent unexpected complications with
+setup.

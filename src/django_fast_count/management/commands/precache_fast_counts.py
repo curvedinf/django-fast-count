@@ -1,13 +1,16 @@
-import time
 from django.core.management.base import BaseCommand
 from django.apps import apps
+from django.utils import timezone
+
 from django_fast_count.managers import FastCountModelManager
+from django_fast_count.models import FastCount
+
 
 class Command(BaseCommand):
     help = "Precaches counts for models using FastCountModelManager."
 
     def handle(self, *args, **options):
-        start_time = time.time()
+        start_time = timezone.now()
         self.stdout.write("Starting fast count precaching...")
         processed_managers = 0
         processed_models = set()
@@ -53,7 +56,7 @@ class Command(BaseCommand):
             if found_fast_manager_on_model:
                 processed_models.add(f"{model._meta.app_label}.{model.__name__}")
 
-        end_time = time.time()
+        end_time = timezone.now()
         duration = end_time - start_time
 
         self.stdout.write("-" * 30)
@@ -61,7 +64,7 @@ class Command(BaseCommand):
             self.stdout.write(
                 self.style.SUCCESS(
                     f"Successfully processed {processed_managers} FastCountModelManager instances "
-                    f"across {len(processed_models)} models in {duration:.2f} seconds."
+                    f"across {len(processed_models)} models in {duration.total_seconds():.2f} seconds."
                 )
             )
         else:
@@ -70,3 +73,17 @@ class Command(BaseCommand):
                     "No models found using FastCountModelManager. No counts were precached."
                 )
             )
+
+        # Delete all expired FastCount entries
+        self.stdout.write("-" * 30)
+        expired_counts = FastCount.objects.filter(expires_at__lt=timezone.now())
+        num_expired = expired_counts.count()
+        if num_expired > 0:
+            expired_counts.delete()
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"Deleted {num_expired} expired FastCount entries."
+                )
+            )
+        else:
+            self.stdout.write(self.style.WARNING("No FastCount entries were expired."))
