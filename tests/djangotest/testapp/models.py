@@ -6,10 +6,12 @@ from django.db.models import Model, UUIDField, BooleanField
 
 from django_fast_count.managers import FastCountModelManager
 
+def get_random_boolean():
+    return choice([True, False])
 
 class TestModel(Model):
     uuid = UUIDField(default=uuid.uuid4)
-    flag = BooleanField(default=choice([True, False]))
+    flag = BooleanField(default=get_random_boolean)
 
     objects = FastCountModelManager(
         precache_count_every=timedelta(minutes=1),
