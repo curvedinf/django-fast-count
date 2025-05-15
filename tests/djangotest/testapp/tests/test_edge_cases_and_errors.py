@@ -4,7 +4,7 @@ from django.utils import timezone
 from datetime import timedelta
 from django.contrib.contenttypes.models import ContentType
 from django.core.management import call_command
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call # Added call
 from io import StringIO
 import os
 import time
@@ -40,6 +40,7 @@ def clean_state_for_edge_cases():
     ModelWithDynamicallyAssignedManager.objects.all().delete()
     AnotherTestModel.objects.all().delete()
     ModelWithSimpleManager.objects.all().delete()
+
     # Reset env var if set by tests
     original_fork_setting = os.environ.pop(DISABLE_FORK_ENV_VAR, None)
     yield
@@ -91,7 +92,7 @@ def test_get_cache_key_fallback_on_sql_error(capsys):
     assert cache_key.startswith("fallback:")
     captured = capsys.readouterr()
     assert (
-        "Warning: Could not generate precise cache key for TestModel using SQL"
+        f"Warning: Could not generate precise cache key for {TestModel.__name__} using SQL"
         in captured.out
     )
     assert "SQL generation failed" in captured.out
@@ -113,7 +114,7 @@ def test_get_precache_querysets_handles_bad_return_type(capsys):
     assert actual_precached_sql == expected_all_sql
     captured = capsys.readouterr()
     assert (
-        "ModelWithBadFastCountQuerysets.fast_count_querysets did not return a list or tuple."
+        f"{ModelWithBadFastCountQuerysets.__name__}.fast_count_querysets did not return a list or tuple."
         in captured.out
     )
 
@@ -142,6 +143,7 @@ def test_precache_counts_handles_error_for_one_queryset(monkeypatch, capsys):
                         and hasattr(child_node.lhs.lhs.target, "name")
                     ):
                         lookup_field_name = child_node.lhs.lhs.target.name
+
                     if lookup_field_name == "flag" and child_node.rhs is True:
                         is_flag_true_filter = True
                         break
@@ -157,6 +159,7 @@ def test_precache_counts_handles_error_for_one_queryset(monkeypatch, capsys):
         results = qs_for_precache.precache_counts()
 
     captured = capsys.readouterr()
+
     qs_all = TestModel.objects.all()
     qs_true = TestModel.objects.filter(flag=True)
     qs_false = TestModel.objects.filter(flag=False)
@@ -171,15 +174,15 @@ def test_precache_counts_handles_error_for_one_queryset(monkeypatch, capsys):
         and "Error: Simulated DB error for flag=True count" in results[key_true]
     )
     assert results[key_false] == 3
+
     assert (
-        "Error precaching count for TestModel (manager: objects) queryset"
+        f"Error precaching count for {TestModel.__name__} (manager: objects) queryset"
         in captured.out
     )  # manager name is from qs instance
     assert "Simulated DB error for flag=True count" in captured.out
 
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = qs_for_precache.manager_name  # Get manager name from the QS instance
-
     assert (
         FastCount.objects.get(
             content_type=model_ct, manager_name=manager_name, queryset_hash=key_all
@@ -202,6 +205,7 @@ def test_maybe_trigger_precache_lock_not_acquired(monkeypatch, capsys):
     qs = TestModel.objects.all()
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = qs.manager_name
+    model_name = qs.model.__name__
 
     monkeypatch.setattr(qs, "precache_count_every", timedelta(seconds=1))
     # Ensure last_run_key is old enough to trigger
@@ -212,6 +216,7 @@ def test_maybe_trigger_precache_lock_not_acquired(monkeypatch, capsys):
         time.time() - qs.precache_count_every.total_seconds() * 2,
         timeout=None,
     )
+
     with patch(
         "django.core.cache.cache.add", return_value=False
     ) as mock_cache_add:  # Simulate lock not acquired
@@ -220,7 +225,7 @@ def test_maybe_trigger_precache_lock_not_acquired(monkeypatch, capsys):
     mock_cache_add.assert_called_once()
     captured = capsys.readouterr()
     assert (
-        f"Precache lock {qs._precache_lock_key_template.format(ct_id=model_ct.id, manager=manager_name)} not acquired"
+        f"Precache lock {qs._precache_lock_key_template.format(ct_id=model_ct.id, manager=manager_name)} not acquired. Process for {model_name} ({manager_name}) already running or recently finished/failed."
         in captured.out
     )
 
@@ -231,6 +236,7 @@ def test_maybe_trigger_precache_synchronous_mode_success(monkeypatch, capsys):
     qs = TestModel.objects.all()
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = qs.manager_name
+    model_name = qs.model.__name__
 
     monkeypatch.setattr(qs, "precache_count_every", timedelta(seconds=1))
     initial_last_run_ts = time.time() - qs.precache_count_every.total_seconds() * 2
@@ -252,13 +258,14 @@ def test_maybe_trigger_precache_synchronous_mode_success(monkeypatch, capsys):
     mock_precache_counts_instance.assert_called_once_with()  # No manager_name argument
     captured = capsys.readouterr()
     assert (
-        f"SYNC_TEST_MODE: Forking disabled. Running precache_counts synchronously for {model_ct} ({manager_name})."
+        f"SYNC_TEST_MODE: Forking disabled. Running precache_counts synchronously for {model_name} ({manager_name})."
         in captured.out
     )
     assert (
-        f"SYNC_TEST_MODE: precache_counts finished synchronously for {model_ct} ({manager_name})."
+        f"SYNC_TEST_MODE: precache_counts finished synchronously for {model_name} ({manager_name})."
         in captured.out
     )
+
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=manager_name
     )
@@ -275,6 +282,7 @@ def test_maybe_trigger_precache_synchronous_mode_error(monkeypatch, capsys):
     qs = TestModel.objects.all()
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = qs.manager_name
+    model_name = qs.model.__name__
 
     monkeypatch.setattr(qs, "precache_count_every", timedelta(seconds=1))
     initial_last_run_ts = time.time() - qs.precache_count_every.total_seconds() * 2
@@ -299,9 +307,10 @@ def test_maybe_trigger_precache_synchronous_mode_error(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "SYNC_TEST_MODE: Forking disabled." in captured.out
     assert (
-        f"SYNC_TEST_MODE: Error in synchronous precache_counts for {model_ct} ({manager_name}): Sync precache error"
+        f"SYNC_TEST_MODE: Error in synchronous precache_counts for {model_name} ({manager_name}): Sync precache error"
         in captured.out
     )
+
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=manager_name
     )
@@ -328,6 +337,7 @@ def test_maybe_trigger_precache_forking_parent_path(
     qs = TestModel.objects.all()
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = qs.manager_name
+    model_name = qs.model.__name__
 
     monkeypatch.setattr(qs, "precache_count_every", timedelta(seconds=1))
     cache.set(
@@ -349,9 +359,10 @@ def test_maybe_trigger_precache_forking_parent_path(
     mock_os_exit.assert_not_called()
     captured = capsys.readouterr()
     assert (
-        f"Forked background precache process 12345 for {model_ct} ({manager_name})."
+        f"Forked background precache process 12345 for {model_name} ({manager_name})."
         in captured.out
     )
+
     lock_key = qs._precache_lock_key_template.format(
         ct_id=model_ct.id, manager=manager_name
     )
@@ -374,6 +385,7 @@ def test_maybe_trigger_precache_forking_child_path_success(
     qs = TestModel.objects.all()  # Get QS instance first
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = qs.manager_name
+    model_name = qs.model.__name__
 
     monkeypatch.setattr(qs, "precache_count_every", timedelta(seconds=1))
     cache.set(
@@ -398,18 +410,25 @@ def test_maybe_trigger_precache_forking_child_path_success(
         qs.maybe_trigger_precache()
 
     mock_os_fork.assert_called_once()
-    mock_close_all.assert_called_once()
+    assert mock_close_all.call_count == 2 # Called twice in child process
     mock_precache_counts_on_instance.assert_called_once_with()  # No manager_name argument
     mock_os_exit.assert_called_once_with(0)
+
     captured = capsys.readouterr()
     assert (
-        f"Background precache process (PID {child_pid}) starting for {model_ct} ({manager_name})."
+        f"Background precache process (PID {child_pid}) starting for {model_name} (manager: {manager_name}) using DB alias 'default'."
         in captured.out
     )
     assert (
-        f"Background precache process (PID {child_pid}) finished successfully."
+        f"Background precache process (PID {child_pid}) for {model_name} (manager: {manager_name}) finished successfully."
         in captured.out
     )
+    assert ( # Check the log message for DB connection closure
+        f"Background precache process (PID {child_pid}) for {model_name} (manager: {manager_name}) closed its DB connections."
+        in captured.out
+    )
+
+
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=manager_name
     )
@@ -436,6 +455,7 @@ def test_maybe_trigger_precache_forking_child_path_error(
     qs = TestModel.objects.all()  # Get QS instance first
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = qs.manager_name
+    model_name = qs.model.__name__
 
     monkeypatch.setattr(qs, "precache_count_every", timedelta(seconds=1))
     original_last_run_time_value = 0
@@ -463,18 +483,25 @@ def test_maybe_trigger_precache_forking_child_path_error(
         qs.maybe_trigger_precache()
 
     mock_os_fork.assert_called_once()
-    mock_close_all.assert_called_once()
+    assert mock_close_all.call_count == 2 # Called twice in child process
     mock_precache_counts_on_instance.assert_called_once_with()  # No manager_name argument
     mock_os_exit.assert_called_once_with(1)
+
     captured = capsys.readouterr()
     assert (
-        f"Background precache process (PID {child_pid}) starting for {model_ct} ({manager_name})."
+        f"Background precache process (PID {child_pid}) starting for {model_name} (manager: {manager_name}) using DB alias 'default'."
         in captured.out
     )
     assert (
-        f"Background precache process (PID {child_pid}) failed: Child precache error"
+        f"Background precache process (PID {child_pid}) for {model_name} (manager: {manager_name}) failed: Child precache error"
         in captured.out
     )
+    assert ( # Check the log message for DB connection closure
+        f"Background precache process (PID {child_pid}) for {model_name} (manager: {manager_name}) closed its DB connections."
+        in captured.out
+    )
+
+
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=manager_name
     )
@@ -499,7 +526,6 @@ def test_precache_command_no_fastcount_managers(capsys):
 
 def test_precache_command_handles_error_in_manager_precache(monkeypatch, capsys):
     create_test_models_deterministic(flag_true_count=1)
-
     # Assuming the command precache_fast_counts calls qs.precache_counts()
     # We need to patch FastCountQuerySet.precache_counts
     original_qs_precache_counts_method = FastCountQuerySet.precache_counts
@@ -512,12 +538,11 @@ def test_precache_command_handles_error_in_manager_precache(monkeypatch, capsys)
         return results
 
     monkeypatch.setattr(FastCountQuerySet, "precache_counts", faulty_precache_counts)
-
     stdout_capture = StringIO()
     call_command("precache_fast_counts", stdout=stdout_capture)
-    captured_out = stdout_capture.getvalue()
 
-    assert "Processing: testapp.TestModel (manager: 'objects')" in captured_out
+    captured_out = stdout_capture.getvalue()
+    assert f"Processing: testapp.{TestModel.__name__} (manager: 'objects')" in captured_out
     # The number of querysets is obtained from the QS instance
     num_querysets = len(TestModel.objects.all().get_precache_querysets())
     assert f"Precached counts for {num_querysets} querysets:" in captured_out

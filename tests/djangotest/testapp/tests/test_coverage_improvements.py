@@ -3,7 +3,7 @@ from django.core.cache import cache
 from datetime import timedelta
 from django.contrib.contenttypes.models import ContentType
 from django.core.management import call_command
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call # Added call
 from io import StringIO
 import os
 import time
@@ -64,6 +64,7 @@ def test_precache_command_manager_discovery_fallback(capsys, monkeypatch):
     ContentType.objects.get_for_model(
         FallbackDiscoveryTestModel
     )  # Ensure CT type exists
+
     # Mock FastCountQuerySet.precache_counts as it's called by the command
     with patch(
         "django_fast_count.managers.FastCountQuerySet.precache_counts", return_value={}
@@ -87,7 +88,6 @@ def test_precache_command_general_error_in_manager_processing(capsys, monkeypatc
     in precache_fast_counts.py
     """
     create_test_models(1)
-
     stderr_capture = StringIO()
     # Patch FastCountQuerySet.precache_counts to raise an error
     with patch(
@@ -120,6 +120,7 @@ def test_fcqs_count_db_cache_generic_error(monkeypatch, capsys):
     monkeypatch.setattr(
         FastCountQuerySet, "maybe_trigger_precache", lambda *args, **kwargs: None
     )
+
     cache_key = qs._get_cache_key()
     cache.delete(cache_key)
     original_qs_get = django_models.query.QuerySet.get
@@ -153,12 +154,13 @@ def test_fcqs_count_retroactive_cache_db_error(monkeypatch, capsys):
 
     # Configure manager for this test scenario
     monkeypatch.setattr(TestModel.objects, "cache_counts_larger_than", 5)
-
     qs = TestModel.objects.all()
+
     # Patch FastCountQuerySet.maybe_trigger_precache to do nothing for this test
     monkeypatch.setattr(
         FastCountQuerySet, "maybe_trigger_precache", lambda *args, **kwargs: None
     )
+
     cache_key = qs._get_cache_key()
     cache.delete(cache_key)
     FastCount.objects.filter(queryset_hash=cache_key).delete()
@@ -187,14 +189,17 @@ def test_fcmanager_init_precache_lock_timeout_types():
     """
     manager_td = FastCountManager(precache_lock_timeout=timedelta(seconds=120))
     assert manager_td.precache_lock_timeout == 120
+
     manager_int = FastCountManager(precache_lock_timeout=180)
     assert manager_int.precache_lock_timeout == 180
+
     # Test default calculation (precache_lock_timeout=None)
     manager_default_short_every = FastCountManager(
         precache_count_every=timedelta(minutes=2)
     )  # 120s
     # Expected: max(300, 120 * 1.5) = max(300, 180) = 300
     assert manager_default_short_every.precache_lock_timeout == 300
+
     manager_default_long_every = FastCountManager(
         precache_count_every=timedelta(minutes=60)
     )  # 3600s
@@ -249,15 +254,17 @@ def test_fcqs_maybe_trigger_precache_fork_oserror(mock_os_fork, monkeypatch, cap
     """
     if DISABLE_FORK_ENV_VAR in os.environ:
         del os.environ[DISABLE_FORK_ENV_VAR]
+
     mock_os_fork.side_effect = OSError("Fork failed spectacularly")
 
     # Configure manager and get QS instance
     manager = TestModel.objects
     monkeypatch.setattr(manager, "precache_count_every", timedelta(seconds=1))
     qs = manager.all()  # This QS instance will have precache_count_every=1s
-    model_ct = ContentType.objects.get_for_model(qs.model)
+    model_name = qs.model.__name__ # Use model name for log matching
 
     # Ensure precache logic attempts to run
+    model_ct = ContentType.objects.get_for_model(qs.model) # Still needed for key generation
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=qs.manager_name
     )
@@ -267,10 +274,9 @@ def test_fcqs_maybe_trigger_precache_fork_oserror(mock_os_fork, monkeypatch, cap
 
     captured = capsys.readouterr()
     assert (
-        f"Error forking/managing precache process for {model_ct} ({qs.manager_name}): Fork failed spectacularly"
+        f"Error forking/managing precache process for {model_name} ({qs.manager_name}): Fork failed spectacularly"
         in captured.out
     )
-
     lock_key = qs._precache_lock_key_template.format(
         ct_id=model_ct.id, manager=qs.manager_name
     )
@@ -285,12 +291,14 @@ def test_fcqs_maybe_trigger_precache_outer_exception(monkeypatch, capsys):
     manager = TestModel.objects
     monkeypatch.setattr(manager, "precache_count_every", timedelta(seconds=1))
     qs = manager.all()
-    model_ct = ContentType.objects.get_for_model(qs.model)
+    model_name = qs.model.__name__ # Use model name for log matching
+    model_ct = ContentType.objects.get_for_model(qs.model) # Still needed for key generation
 
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=qs.manager_name
     )
     cache.set(last_run_key, 0)  # Ensure the precache logic attempts to run
+
     # Make os.environ.get raise an exception *after* the lock is acquired.
     with patch("os.environ.get", side_effect=Exception("Environ Get Kaboom")):
         # Ensure cache.add succeeds so we enter the main try block
@@ -300,10 +308,9 @@ def test_fcqs_maybe_trigger_precache_outer_exception(monkeypatch, capsys):
 
     captured = capsys.readouterr()
     assert (
-        f"Unexpected error during precache trigger for {model_ct} ({qs.manager_name}): Environ Get Kaboom"
+        f"Unexpected error during precache trigger for {model_name} ({qs.manager_name}): Environ Get Kaboom"
         in captured.out
     )
-
     lock_key = qs._precache_lock_key_template.format(
         ct_id=model_ct.id, manager=qs.manager_name
     )
