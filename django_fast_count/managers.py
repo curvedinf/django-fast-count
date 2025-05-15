@@ -25,7 +25,7 @@ class FastCountQuerySet(QuerySet):
     potentially trigger background precaching.
     """
 
-    # The manager instance will be attached here by FastCountModelManager.get_queryset
+    # The manager instance will be attached here by FastCountManager.get_queryset
     manager = None
 
     def _get_manager_name(self):
@@ -61,7 +61,7 @@ class FastCountQuerySet(QuerySet):
         # Dynamically import FastCount to avoid circular dependency issues at import time
         from .models import FastCount
 
-        if not self.manager or not issubclass(type(self.manager), FastCountModelManager):
+        if not self.manager or not issubclass(type(self.manager), FastCountManager):
             # Fallback to default count if manager is not set or not the right type/subclass
             return super().count()
 
@@ -151,7 +151,7 @@ class FastCountQuerySet(QuerySet):
         return actual_count
 
 
-class FastCountModelManager(models.Manager):
+class FastCountManager(models.Manager):
     """
     A model manager that provides a faster count() implementation for large tables
     by utilizing cached counts (both precached and retroactively cached).

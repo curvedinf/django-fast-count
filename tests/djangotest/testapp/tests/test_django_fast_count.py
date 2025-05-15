@@ -8,7 +8,7 @@ from django.core.management import call_command
 from unittest.mock import patch, ANY
 from testapp.models import TestModel
 from django_fast_count.models import FastCount
-from django_fast_count.managers import FastCountModelManager
+from django_fast_count.managers import FastCountManager
 
 # Pytest marker for DB access for all tests in this module
 pytestmark = pytest.mark.django_db

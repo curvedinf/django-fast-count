@@ -2,12 +2,12 @@ from django.core.management.base import BaseCommand
 from django.apps import apps
 from django.utils import timezone
 
-from django_fast_count.managers import FastCountModelManager
+from django_fast_count.managers import FastCountManager
 from django_fast_count.models import FastCount
 
 
 class Command(BaseCommand):
-    help = "Precaches counts for models using FastCountModelManager."
+    help = "Precaches counts for models using FastCountManager."
 
     def handle(self, *args, **options):
         start_time = timezone.now()
@@ -26,7 +26,7 @@ class Command(BaseCommand):
             found_fast_manager_on_model = False
 
             for manager_name, manager_instance in managers.items():
-                if isinstance(manager_instance, FastCountModelManager):
+                if isinstance(manager_instance, FastCountManager):
                     found_fast_manager_on_model = True
                     processed_managers += 1
                     self.stdout.write(
@@ -71,14 +71,14 @@ class Command(BaseCommand):
         if processed_managers > 0:
             self.stdout.write(
                 self.style.SUCCESS(
-                    f"Successfully processed {processed_managers} FastCountModelManager instances "
+                    f"Successfully processed {processed_managers} FastCountManager instances "
                     f"across {len(processed_models)} models in {duration.total_seconds():.2f} seconds."
                 )
             )
         else:
             self.stdout.write(
                 self.style.WARNING(
-                    "No models found using FastCountModelManager. No counts were precached."
+                    "No models found using FastCountManager. No counts were precached."
                 )
             )
 

@@ -20,9 +20,9 @@ list page, this can be annoying at best or unusable at worst.
 This package provides a fast, plug-and-play, database agnostic count 
 implementation. To use it, you just need to have 
 `django-fast-count` installed and then override your Model's 
-`ModelManager` with `FastCountModelManager`.
+`ModelManager` with `FastCountManager`.
 
-After `FastCountModelManager` is on your Model, fast counts are immediately
+After `FastCountManager` is on your Model, fast counts are immediately
 activate. Precaching for all `.count()` queries is triggered automatically
 on every `.count()` query in a forked background process.
 
@@ -55,14 +55,14 @@ python manage.py migrate
 from datetime import timedelta
 
 from django.db.models import Model, BooleanField
-from django_fast_count.managers import FastCountModelManager
+from django_fast_count.managers import FastCountManager
 
 
 class YourModel(Model):
     your_field = BooleanField(default=False)
 
     # By default, only .all() is precached
-    objects = FastCountModelManager(
+    objects = FastCountManager(
         precache_count_every=timedelta(hours=1),  # Defaults to 10 minutes
         cache_counts_larger_than=100_000,  # Defaults to 1,000,000
         expire_cached_counts_after=timedelta(hours=1),  # Defaults to 10 minutes
@@ -77,9 +77,9 @@ class YourModel(Model):
         ]
 ```
 
-## FastCountModelManager
+## FastCountManager
 
-The `FastCountModelManager` is a subclass of the default django `ModelManager` that 
+The `FastCountManager` is a subclass of the default django `ModelManager` that 
 overrides `.count()` to use utilize cached counts. It has two main caching mechanisms:
 
 1. Precaching of select `.count()` queries every specified interval
@@ -92,7 +92,7 @@ It has 3 initialization parameters:
 `.count()` queries
 3. `expire_cached_counts_after` - The frequency at which to expire cached `.count()` queries
 
-By default, `FastCountModelManager` will only precache `.all()` queries. To specify additional
+By default, `FastCountManager` will only precache `.all()` queries. To specify additional
 QuerySets to precache, implement a `fast_count_querysets` method on your model that returns a 
 list of QuerySets. Each of those QuerySets will be counted every `precache_count_every` and cached
 for use on future matching `.count()` queries.

@@ -2,7 +2,7 @@ import uuid
 from datetime import timedelta
 from random import choice
 from django.db import models
-from django_fast_count.managers import FastCountModelManager
+from django_fast_count.managers import FastCountManager
 
 
 def get_random_boolean():
@@ -13,7 +13,7 @@ class TestModel(models.Model):
     uuid = models.UUIDField(default=uuid.uuid4)
     flag = models.BooleanField(default=get_random_boolean)
 
-    objects = FastCountModelManager(
+    objects = FastCountManager(
         precache_count_every=timedelta(minutes=1),
         cache_counts_larger_than=1000,
         expire_cached_counts_after=timedelta(minutes=1),
@@ -28,7 +28,7 @@ class TestModel(models.Model):
 
 
 class ModelWithBadFastCountQuerysets(models.Model):
-    objects = FastCountModelManager()
+    objects = FastCountManager()
 
     @classmethod
     def fast_count_querysets(cls):
@@ -56,7 +56,7 @@ class AnotherTestModel(models.Model):  # Model without FastCountManager
 
 class ModelWithSimpleManager(models.Model):  # For manager discovery fallback
     data = models.CharField(max_length=10)
-    objects = FastCountModelManager()
+    objects = FastCountManager()
 
     @classmethod
     def fast_count_querysets(cls):

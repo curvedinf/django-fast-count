@@ -9,7 +9,7 @@ import os
 from testapp.models import TestModel
 from django_fast_count.models import FastCount
 from django_fast_count.managers import (
-    FastCountModelManager,
+    FastCountManager,
     FastCountQuerySet,
     DISABLE_FORK_ENV_VAR,
 )
@@ -60,8 +60,8 @@ def test_precache_command_manager_discovery_fallback(capsys, monkeypatch):
     # Use the sacrificial FallbackDiscoveryTestModel to avoid altering TestModel._meta
     # and causing teardown issues.
 
-    # 1. Create a FastCountModelManager instance and set its model
-    mock_objects_manager = FastCountModelManager()
+    # 1. Create a FastCountManager instance and set its model
+    mock_objects_manager = FastCountManager()
     monkeypatch.setattr(mock_objects_manager, "model", FallbackDiscoveryTestModel)
 
     # 2. Monkeypatch FallbackDiscoveryTestModel.objects *before* altering its _meta.managers_map.
@@ -136,7 +136,7 @@ def test_fcqs_get_manager_name_no_manager_or_model_attr(capsys):
     qs_manager_no_model = FastCountQuerySet(model=TestModel)
     # Create a mock manager that doesn't have a 'model' attribute when checked by hasattr
     mock_manager_without_model = MagicMock(
-        spec=FastCountModelManager
+        spec=FastCountManager
     )  # Use spec for isinstance checks
     # To truly simulate no 'model' attribute for hasattr, we ensure it's not present.
     if hasattr(mock_manager_without_model, "model"):
@@ -225,24 +225,24 @@ def test_fcqs_count_retroactive_cache_db_error(monkeypatch, capsys):
 
 def test_fcmanager_init_precache_lock_timeout_types():
     """
-    Covers lines 140-145 in managers.py (FastCountModelManager.__init__):
+    Covers lines 140-145 in managers.py (FastCountManager.__init__):
     Initialization with timedelta and int for precache_lock_timeout.
     (Old line numbers were ~138-140)
     """
-    manager_td = FastCountModelManager(precache_lock_timeout=timedelta(seconds=120))
+    manager_td = FastCountManager(precache_lock_timeout=timedelta(seconds=120))
     assert manager_td.precache_lock_timeout == 120
 
-    manager_int = FastCountModelManager(precache_lock_timeout=180)
+    manager_int = FastCountManager(precache_lock_timeout=180)
     assert manager_int.precache_lock_timeout == 180
 
     # Test default calculation (precache_lock_timeout=None)
-    manager_default_short_every = FastCountModelManager(
+    manager_default_short_every = FastCountManager(
         precache_count_every=timedelta(minutes=2)
     )  # 120s
     # Expected: max(300, 120 * 1.5) = max(300, 180) = 300
     assert manager_default_short_every.precache_lock_timeout == 300
 
-    manager_default_long_every = FastCountModelManager(
+    manager_default_long_every = FastCountManager(
         precache_count_every=timedelta(minutes=60)
     )  # 3600s
     # Expected: max(300, 3600 * 1.5) = max(300, 5400) = 5400
@@ -250,7 +250,7 @@ def test_fcmanager_init_precache_lock_timeout_types():
 
 
 class ModelWithOtherTypeErrorInFCQ(django_models.Model):
-    objects = FastCountModelManager()
+    objects = FastCountManager()
 
     @classmethod
     def fast_count_querysets(cls):

@@ -11,7 +11,7 @@ import time
 from django.db import models as django_models  # To avoid conflict with local 'models'
 from django_fast_count.models import FastCount
 from django_fast_count.managers import (
-    FastCountModelManager,
+    FastCountManager,
     FastCountQuerySet,
     DISABLE_FORK_ENV_VAR,
 )
@@ -316,7 +316,7 @@ def test_maybe_trigger_precache_synchronous_mode_error(monkeypatch, capsys):
 
 def test_get_manager_name_fallback_warning(monkeypatch, capsys):
     ContentType.objects.get_for_model(ModelWithDynamicallyAssignedManager)
-    manager_instance = FastCountModelManager()
+    manager_instance = FastCountManager()
     qs = FastCountQuerySet(model=ModelWithDynamicallyAssignedManager)
     qs.manager = manager_instance
     manager_instance.model = ModelWithDynamicallyAssignedManager
@@ -377,7 +377,7 @@ def test_maybe_trigger_precache_forking_parent_path(
 @patch("os._exit")
 @patch("django.db.connections.close_all")
 @patch("time.time")
-# Removed @patch.object(FastCountModelManager, "precache_counts")
+# Removed @patch.object(FastCountManager, "precache_counts")
 def test_maybe_trigger_precache_forking_child_path_success(
     mock_time, mock_close_all, mock_os_exit, mock_os_fork, monkeypatch, capsys
 ):
@@ -436,7 +436,7 @@ def test_maybe_trigger_precache_forking_child_path_success(
 @patch("os._exit")
 @patch("django.db.connections.close_all")
 @patch("time.time")
-# Removed @patch.object(FastCountModelManager, "precache_counts")
+# Removed @patch.object(FastCountManager, "precache_counts")
 def test_maybe_trigger_precache_forking_child_path_error(
     mock_time, mock_close_all, mock_os_exit, mock_os_fork, monkeypatch, capsys
 ):
@@ -501,7 +501,7 @@ def test_precache_command_no_fastcount_managers(capsys):
         call_command("precache_fast_counts")
     captured = capsys.readouterr()
     assert (
-        "No models found using FastCountModelManager. No counts were precached."
+        "No models found using FastCountManager. No counts were precached."
         in captured.out
     )
 

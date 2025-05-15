@@ -1,4 +1,4 @@
-from django_fast_count.managers import FastCountModelManager, FastCountQuerySet
+from django_fast_count.managers import FastCountManager, FastCountQuerySet
 
 # Two-deep inheritance for FastCountQuerySet
 class IntermediateFastCountQuerySet(FastCountQuerySet):
@@ -13,19 +13,19 @@ class DeepFastCountQuerySet(IntermediateFastCountQuerySet):
     """
     pass
 
-# Two-deep inheritance for FastCountModelManager
-class IntermediateFastCountModelManager(FastCountModelManager):
+# Two-deep inheritance for FastCountManager
+class IntermediateFastCountManager(FastCountManager):
     """
-    An intermediate ModelManager inheriting from FastCountModelManager.
+    An intermediate ModelManager inheriting from FastCountManager.
     """
     def get_queryset(self):
         qs = IntermediateFastCountQuerySet(self.model, using=self._db)
         qs.manager = self
         return qs
 
-class DeepFastCountModelManager(IntermediateFastCountModelManager):
+class DeepFastCountManager(IntermediateFastCountManager):
     """
-    A ModelManager inheriting from IntermediateFastCountModelManager.
+    A ModelManager inheriting from IntermediateFastCountManager.
     """
     def get_queryset(self):
         qs = DeepFastCountQuerySet(self.model, using=self._db)
