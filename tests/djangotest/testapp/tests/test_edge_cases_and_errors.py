@@ -65,17 +65,17 @@ def clean_state_for_edge_cases(settings as django_settings):
     # Restore original BASE_DIR and environment variables
     if original_base_dir is not None:
         django_settings.BASE_DIR = original_base_dir
-    elif hasattr(django_settings, "BASE_DIR"):
-        delattr(django_settings, "BASE_DIR") # if it was set by this fixture
+    elif hasattr(django_settings, "BASE_DIR"): # if it was set by this fixture and not originally present
+        delattr(django_settings, "BASE_DIR")
 
     if original_sync_setting is not None:
         os.environ[FORCE_SYNC_PRECACHE_ENV_VAR] = original_sync_setting
-    elif FORCE_SYNC_PRECACHE_ENV_VAR in os.environ:
+    elif FORCE_SYNC_PRECACHE_ENV_VAR in os.environ: # if set by test but not originally
         del os.environ[FORCE_SYNC_PRECACHE_ENV_VAR]
 
     if original_sync_setting_old is not None:
         os.environ[_DISABLE_FORK_ENV_VAR_OLD_NAME] = original_sync_setting_old
-    elif _DISABLE_FORK_ENV_VAR_OLD_NAME in os.environ:
+    elif _DISABLE_FORK_ENV_VAR_OLD_NAME in os.environ: # if set by test but not originally
         del os.environ[_DISABLE_FORK_ENV_VAR_OLD_NAME]
 
 
@@ -271,7 +271,7 @@ def test_maybe_trigger_precache_synchronous_mode_success(monkeypatch, capsys, se
 
     current_time_ts = time.time()
     with patch("time.time", return_value=current_time_ts):
-        qs.maybe_trigger_precache()
+        qs.maybe_trigger_precache() # This will access django_settings.BASE_DIR if not sync (but it is)
 
     mock_precache_counts_instance.assert_called_once_with()
     captured = capsys.readouterr()
@@ -319,7 +319,7 @@ def test_maybe_trigger_precache_synchronous_mode_error(monkeypatch, capsys, sett
 
     current_time_ts = time.time()
     with patch("time.time", return_value=current_time_ts):
-        qs.maybe_trigger_precache()
+        qs.maybe_trigger_precache() # Accesses django_settings.BASE_DIR if not sync (but it is)
 
     mock_precache_counts_instance.assert_called_once_with()
     captured = capsys.readouterr()
@@ -389,6 +389,11 @@ def test_maybe_trigger_precache_subprocess_launch_success(
         f"Launched background precache process (PID 12345) for {model_name} ({manager_name})."
         in captured.out
     )
+    assert ( # Also check the "Attempting to launch" message
+        f"Attempting to launch background precache command for {model_name} ({manager_name})."
+        in captured.out
+    )
+
 
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=manager_name
