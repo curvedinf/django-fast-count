@@ -16,18 +16,14 @@ class DeepFastCountQuerySet(IntermediateFastCountQuerySet):
 # Two-deep inheritance for FastCountManager
 class IntermediateFastCountManager(FastCountManager):
     """
-    An intermediate ModelManager inheriting from FastCountManager.
+    An intermediate Manager inheriting from FastCountManager.
     """
     def get_queryset(self):
-        qs = IntermediateFastCountQuerySet(self.model, using=self._db)
-        qs.manager = self
-        return qs
+        return IntermediateFastCountQuerySet(self.model, using=self._db)
 
 class DeepFastCountManager(IntermediateFastCountManager):
     """
-    A ModelManager inheriting from IntermediateFastCountManager.
+    A Manager inheriting from IntermediateFastCountManager.
     """
     def get_queryset(self):
-        qs = DeepFastCountQuerySet(self.model, using=self._db)
-        qs.manager = self
-        return qs
+        return DeepFastCountQuerySet(self.model, using=self._db)

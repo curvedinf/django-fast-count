@@ -315,26 +315,6 @@ def test_maybe_trigger_precache_synchronous_mode_error(monkeypatch, capsys):
     assert cache.get(lock_key) is None
 
 
-def test_get_manager_name_fallback_warning(monkeypatch, capsys):
-    ContentType.objects.get_for_model(ModelWithDynamicallyAssignedManager)
-    manager_instance = FastCountManager()
-    # Set the model on the manager instance itself, as _get_own_name_on_model needs it
-    manager_instance.model = ModelWithDynamicallyAssignedManager
-
-    # ModelWithDynamicallyAssignedManager has no explicit manager named 'objects' or similar
-    # Patching managers_map to be empty ensures the second lookup path also fails.
-    with patch.object(ModelWithDynamicallyAssignedManager._meta, "managers_map", {}):
-        manager_name = manager_instance._get_own_name_on_model()
-
-    assert manager_name == "objects"  # Default fallback
-    captured = capsys.readouterr()
-    # The warning message from FastCountManager._get_own_name_on_model includes the manager instance string representation
-    assert (
-        f"Warning: Could not determine manager name for ModelWithDynamicallyAssignedManager (manager instance: {manager_instance}). Falling back to 'objects'."
-        in captured.out
-    )
-
-
 @patch("os.fork")
 @patch("os._exit")
 @patch("django.db.connections.close_all")
