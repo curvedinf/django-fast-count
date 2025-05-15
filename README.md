@@ -254,7 +254,6 @@ When overriding `get_queryset` in your `FastCountManager` subclass, ensure you i
 ### Environment Variables:
 
 *   `DJANGO_FAST_COUNT_FORCE_SYNC_PRECACHE`: Set to `1` or `true` to run precaching synchronously in the current process when triggered by `maybe_trigger_precache()`, instead of launching a background subprocess. This is useful for testing or environments where background subprocesses are problematic.
-*   `DJANGO_FAST_COUNT_DISABLE_FORK_FOR_TESTING` (Legacy): This older environment variable is also recognized for backward compatibility and has the same effect as `DJANGO_FAST_COUNT_FORCE_SYNC_PRECACHE`.
 
 ## Management Commands
 

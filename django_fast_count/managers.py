@@ -19,9 +19,6 @@ DEFAULT_CACHE_COUNTS_LARGER_THAN = 1_000_000
 DEFAULT_EXPIRE_CACHED_COUNTS_AFTER = timedelta(minutes=10)
 
 # Environment variable to disable forking/background processing and force synchronous execution.
-# Old name, kept for backward compatibility for a version.
-_DISABLE_FORK_ENV_VAR_OLD_NAME = "DJANGO_FAST_COUNT_DISABLE_FORK_FOR_TESTING"
-# New preferred name.
 FORCE_SYNC_PRECACHE_ENV_VAR = "DJANGO_FAST_COUNT_FORCE_SYNC_PRECACHE"
 
 
@@ -330,7 +327,7 @@ class FastCountQuerySet(QuerySet):
             # Check new and old env var names for synchronous mode
             force_sync_mode = os.environ.get(
                 FORCE_SYNC_PRECACHE_ENV_VAR
-            ) or os.environ.get(_DISABLE_FORK_ENV_VAR_OLD_NAME)
+            )
 
             if force_sync_mode:
                 print(
