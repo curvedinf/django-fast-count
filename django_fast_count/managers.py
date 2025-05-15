@@ -3,7 +3,8 @@ import os
 import time
 from datetime import timedelta
 from django.core.cache import cache
-from django.db import models, connections
+from django.db import connections
+from django.db.models import Manager
 from django.db.models.query import QuerySet
 from django.utils import timezone
 from django.contrib.contenttypes.models import ContentType
@@ -130,7 +131,7 @@ class FastCountQuerySet(QuerySet):
         for qs_to_precache in querysets:
             cache_key = self._get_cache_key(qs_to_precache)
             try:
-                base_qs_for_count = models.QuerySet(
+                base_qs_for_count = QuerySet(
                     model=qs_to_precache.model, query=qs_to_precache.query.clone(), using=qs_to_precache.db
                 )
                 actual_count = base_qs_for_count.count()
@@ -341,7 +342,7 @@ class FastCountQuerySet(QuerySet):
         return actual_count
 
 
-class FastCountManager(models.Manager):
+class FastCountManager(Manager):
     """
     A model manager that returns FastCountQuerySet instances, configured
     for fast counting and background precaching.

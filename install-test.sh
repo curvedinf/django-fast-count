@@ -1,3 +1,4 @@
 #!/bin/sh
 
-pip install -e .[testing]
+pip install -r requirements.txt
+pip install .
