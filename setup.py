@@ -10,7 +10,7 @@ README = (HERE / "README.md").read_text()
 
 setup(
     name="django-fast-count",
-    version="0.1.4",
+    version="0.1.5",
     description="A fast Django .count() implementation for large tables.",
     long_description=README,
     long_description_content_type="text/markdown",
