@@ -3,7 +3,7 @@ from django.core.cache import cache
 from datetime import timedelta
 from django.contrib.contenttypes.models import ContentType
 from django.core.management import call_command
-from unittest.mock import patch, MagicMock, call # Added call
+from unittest.mock import patch, MagicMock, call  # Added call
 from io import StringIO
 import os
 import time
@@ -261,10 +261,12 @@ def test_fcqs_maybe_trigger_precache_fork_oserror(mock_os_fork, monkeypatch, cap
     manager = TestModel.objects
     monkeypatch.setattr(manager, "precache_count_every", timedelta(seconds=1))
     qs = manager.all()  # This QS instance will have precache_count_every=1s
-    model_name = qs.model.__name__ # Use model name for log matching
+    model_name = qs.model.__name__  # Use model name for log matching
 
     # Ensure precache logic attempts to run
-    model_ct = ContentType.objects.get_for_model(qs.model) # Still needed for key generation
+    model_ct = ContentType.objects.get_for_model(
+        qs.model
+    )  # Still needed for key generation
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=qs.manager_name
     )
@@ -291,8 +293,10 @@ def test_fcqs_maybe_trigger_precache_outer_exception(monkeypatch, capsys):
     manager = TestModel.objects
     monkeypatch.setattr(manager, "precache_count_every", timedelta(seconds=1))
     qs = manager.all()
-    model_name = qs.model.__name__ # Use model name for log matching
-    model_ct = ContentType.objects.get_for_model(qs.model) # Still needed for key generation
+    model_name = qs.model.__name__  # Use model name for log matching
+    model_ct = ContentType.objects.get_for_model(
+        qs.model
+    )  # Still needed for key generation
 
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=qs.manager_name

@@ -4,7 +4,7 @@ from django.utils import timezone
 from datetime import timedelta
 from django.contrib.contenttypes.models import ContentType
 from django.core.management import call_command
-from unittest.mock import patch, MagicMock, call # Added call
+from unittest.mock import patch, MagicMock, call  # Added call
 from io import StringIO
 import os
 import time
@@ -410,7 +410,7 @@ def test_maybe_trigger_precache_forking_child_path_success(
         qs.maybe_trigger_precache()
 
     mock_os_fork.assert_called_once()
-    assert mock_close_all.call_count == 2 # Called twice in child process
+    assert mock_close_all.call_count == 2  # Called twice in child process
     mock_precache_counts_on_instance.assert_called_once_with()  # No manager_name argument
     mock_os_exit.assert_called_once_with(0)
 
@@ -423,11 +423,10 @@ def test_maybe_trigger_precache_forking_child_path_success(
         f"Background precache process (PID {child_pid}) for {model_name} (manager: {manager_name}) finished successfully."
         in captured.out
     )
-    assert ( # Check the log message for DB connection closure
+    assert (  # Check the log message for DB connection closure
         f"Background precache process (PID {child_pid}) for {model_name} (manager: {manager_name}) closed its DB connections."
         in captured.out
     )
-
 
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=manager_name
@@ -483,7 +482,7 @@ def test_maybe_trigger_precache_forking_child_path_error(
         qs.maybe_trigger_precache()
 
     mock_os_fork.assert_called_once()
-    assert mock_close_all.call_count == 2 # Called twice in child process
+    assert mock_close_all.call_count == 2  # Called twice in child process
     mock_precache_counts_on_instance.assert_called_once_with()  # No manager_name argument
     mock_os_exit.assert_called_once_with(1)
 
@@ -496,11 +495,10 @@ def test_maybe_trigger_precache_forking_child_path_error(
         f"Background precache process (PID {child_pid}) for {model_name} (manager: {manager_name}) failed: Child precache error"
         in captured.out
     )
-    assert ( # Check the log message for DB connection closure
+    assert (  # Check the log message for DB connection closure
         f"Background precache process (PID {child_pid}) for {model_name} (manager: {manager_name}) closed its DB connections."
         in captured.out
     )
-
 
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=manager_name
@@ -542,7 +540,9 @@ def test_precache_command_handles_error_in_manager_precache(monkeypatch, capsys)
     call_command("precache_fast_counts", stdout=stdout_capture)
 
     captured_out = stdout_capture.getvalue()
-    assert f"Processing: testapp.{TestModel.__name__} (manager: 'objects')" in captured_out
+    assert (
+        f"Processing: testapp.{TestModel.__name__} (manager: 'objects')" in captured_out
+    )
     # The number of querysets is obtained from the QS instance
     num_querysets = len(TestModel.objects.all().get_precache_querysets())
     assert f"Precached counts for {num_querysets} querysets:" in captured_out
