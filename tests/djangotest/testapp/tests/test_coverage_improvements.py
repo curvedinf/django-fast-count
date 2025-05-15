@@ -3,38 +3,59 @@ from django.core.cache import cache
 from datetime import timedelta
 from django.contrib.contenttypes.models import ContentType
 from django.core.management import call_command
-from unittest.mock import patch, MagicMock, call  # Added call
+from unittest.mock import patch, MagicMock
 from io import StringIO
 import os
-import time
+import sys
+import subprocess
 from testapp.models import TestModel
 from django_fast_count.models import FastCount
 from django_fast_count.managers import (
     FastCountManager,
     FastCountQuerySet,
-    DISABLE_FORK_ENV_VAR,
+    FORCE_SYNC_PRECACHE_ENV_VAR,
+    _DISABLE_FORK_ENV_VAR_OLD_NAME,
 )
 from django.db import models as django_models
 
 # Pytest marker for DB access
 pytestmark = pytest.mark.django_db
 
-
 @pytest.fixture(autouse=True)
-def clear_state_and_env():
+def clean_state_and_env_and_settings(settings as django_settings):
     """Ensures a clean state for each test."""
     cache.clear()
     FastCount.objects.all().delete()
     TestModel.objects.all().delete()
-    original_fork_setting = os.environ.pop(DISABLE_FORK_ENV_VAR, None)
+
+    original_sync_setting = os.environ.pop(FORCE_SYNC_PRECACHE_ENV_VAR, None)
+    original_sync_setting_old = os.environ.pop(_DISABLE_FORK_ENV_VAR_OLD_NAME, None)
+    original_base_dir = getattr(django_settings, "BASE_DIR", None)
+
+    # Set a mock BASE_DIR for tests that rely on it for subprocess calls
+    django_settings.BASE_DIR = os.getcwd()
+
+
     yield
+
     cache.clear()
     FastCount.objects.all().delete()
     TestModel.objects.all().delete()
-    if original_fork_setting is not None:
-        os.environ[DISABLE_FORK_ENV_VAR] = original_fork_setting
-    elif DISABLE_FORK_ENV_VAR in os.environ:
-        del os.environ[DISABLE_FORK_ENV_VAR]
+
+    if original_sync_setting is not None:
+        os.environ[FORCE_SYNC_PRECACHE_ENV_VAR] = original_sync_setting
+    elif FORCE_SYNC_PRECACHE_ENV_VAR in os.environ:
+        del os.environ[FORCE_SYNC_PRECACHE_ENV_VAR]
+
+    if original_sync_setting_old is not None:
+        os.environ[_DISABLE_FORK_ENV_VAR_OLD_NAME] = original_sync_setting_old
+    elif _DISABLE_FORK_ENV_VAR_OLD_NAME in os.environ:
+        del os.environ[_DISABLE_FORK_ENV_VAR_OLD_NAME]
+
+    if original_base_dir is not None:
+        django_settings.BASE_DIR = original_base_dir
+    elif hasattr(django_settings, "BASE_DIR"):
+        delattr(django_settings, "BASE_DIR")
 
 
 def create_test_models(count=1, flag=True):
@@ -73,7 +94,6 @@ def test_precache_command_manager_discovery_fallback(capsys, monkeypatch):
             "django.apps.apps.get_models", return_value=[FallbackDiscoveryTestModel]
         ):
             call_command("precache_fast_counts")
-
     captured = capsys.readouterr()
     assert (
         f"Processing: {FallbackDiscoveryTestModel._meta.app_label}.{FallbackDiscoveryTestModel.__name__} (manager: 'objects')"
@@ -123,6 +143,7 @@ def test_fcqs_count_db_cache_generic_error(monkeypatch, capsys):
 
     cache_key = qs._get_cache_key()
     cache.delete(cache_key)
+
     original_qs_get = django_models.query.QuerySet.get
 
     def new_qs_get(qs_self, *args, **kwargs):
@@ -151,7 +172,6 @@ def test_fcqs_count_retroactive_cache_db_error(monkeypatch, capsys):
     when FastCount.objects.update_or_create() for retroactive cache fails.
     """
     create_test_models(10)  # Actual count 10
-
     # Configure manager for this test scenario
     monkeypatch.setattr(TestModel.objects, "cache_counts_larger_than", 5)
     qs = TestModel.objects.all()
@@ -164,6 +184,7 @@ def test_fcqs_count_retroactive_cache_db_error(monkeypatch, capsys):
     cache_key = qs._get_cache_key()
     cache.delete(cache_key)
     FastCount.objects.filter(queryset_hash=cache_key).delete()
+
     original_qs_uoc = django_models.query.QuerySet.update_or_create
 
     def new_qs_uoc(qs_self, *args, **kwargs):
@@ -246,76 +267,78 @@ def test_fcqs_get_precache_querysets_other_typeerror(capsys):
     assert "seems to be an instance method" not in captured.out
 
 
-@patch("os.fork")
-def test_fcqs_maybe_trigger_precache_fork_oserror(mock_os_fork, monkeypatch, capsys):
+@patch("subprocess.Popen")
+def test_fcqs_maybe_trigger_precache_subprocess_launch_oserror(mock_subprocess_popen, monkeypatch, capsys, settings as django_settings):
     """
     Covers error print in FastCountQuerySet.maybe_trigger_precache()
-    when os.fork() raises OSError.
+    when subprocess.Popen() raises OSError.
     """
-    if DISABLE_FORK_ENV_VAR in os.environ:
-        del os.environ[DISABLE_FORK_ENV_VAR]
+    # django_settings.BASE_DIR is set by the fixture
+    os.environ.pop(FORCE_SYNC_PRECACHE_ENV_VAR, None) # Ensure not sync mode
+    os.environ.pop(_DISABLE_FORK_ENV_VAR_OLD_NAME, None) # Ensure old var not sync mode
 
-    mock_os_fork.side_effect = OSError("Fork failed spectacularly")
+    mock_subprocess_popen.side_effect = OSError("Subprocess launch OSError")
 
     # Configure manager and get QS instance
     manager = TestModel.objects
     monkeypatch.setattr(manager, "precache_count_every", timedelta(seconds=1))
-    qs = manager.all()  # This QS instance will have precache_count_every=1s
-    model_name = qs.model.__name__  # Use model name for log matching
+    qs = manager.all()
+    model_name = qs.model.__name__
 
     # Ensure precache logic attempts to run
-    model_ct = ContentType.objects.get_for_model(
-        qs.model
-    )  # Still needed for key generation
+    model_ct = ContentType.objects.get_for_model(qs.model)
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=qs.manager_name
     )
-    cache.set(last_run_key, 0)
+    cache.set(last_run_key, 0) # Mark as due
 
     qs.maybe_trigger_precache()
-
     captured = capsys.readouterr()
+
     assert (
-        f"Error forking/managing precache process for {model_name} ({qs.manager_name}): Fork failed spectacularly"
+        f"Error launching background precache command for {model_name} ({qs.manager_name}): Subprocess launch OSError"
         in captured.out
     )
     lock_key = qs._precache_lock_key_template.format(
         ct_id=model_ct.id, manager=qs.manager_name
     )
-    assert cache.get(lock_key) is None
+    assert cache.get(lock_key) is None # Lock should be released
 
 
-def test_fcqs_maybe_trigger_precache_outer_exception(monkeypatch, capsys):
+def test_fcqs_maybe_trigger_precache_outer_exception(monkeypatch, capsys, settings as django_settings):
     """
     Covers outer try-except block in FastCountQuerySet.maybe_trigger_precache()
-    catching an unexpected error.
+    catching an unexpected error that is not a Popen launch error.
     """
+    # django_settings.BASE_DIR is set by the fixture
+    os.environ.pop(FORCE_SYNC_PRECACHE_ENV_VAR, None) # Ensure not sync mode
+    os.environ.pop(_DISABLE_FORK_ENV_VAR_OLD_NAME, None) # Ensure old var not sync mode
+
     manager = TestModel.objects
     monkeypatch.setattr(manager, "precache_count_every", timedelta(seconds=1))
     qs = manager.all()
-    model_name = qs.model.__name__  # Use model name for log matching
-    model_ct = ContentType.objects.get_for_model(
-        qs.model
-    )  # Still needed for key generation
+    model_name = qs.model.__name__
+    model_ct = ContentType.objects.get_for_model(qs.model)
 
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=qs.manager_name
     )
     cache.set(last_run_key, 0)  # Ensure the precache logic attempts to run
 
-    # Make os.environ.get raise an exception *after* the lock is acquired.
-    with patch("os.environ.get", side_effect=Exception("Environ Get Kaboom")):
+    # Make os.path.join raise an exception after the lock is acquired and sync mode check is passed.
+    with patch("os.path.join", side_effect=Exception("Path Join Kaboom")):
         # Ensure cache.add succeeds so we enter the main try block
         with patch("django.core.cache.cache.add", return_value=True) as mock_cache_add:
             qs.maybe_trigger_precache()
             mock_cache_add.assert_called_once()  # Verify lock acquisition was attempted
 
     captured = capsys.readouterr()
+    # This error should be caught by the outer `except Exception as e:`
     assert (
-        f"Unexpected error during precache trigger for {model_name} ({qs.manager_name}): Environ Get Kaboom"
+        f"Unexpected error during precache trigger for {model_name} ({qs.manager_name}): Path Join Kaboom"
         in captured.out
     )
     lock_key = qs._precache_lock_key_template.format(
         ct_id=model_ct.id, manager=qs.manager_name
     )
-    assert cache.get(lock_key) is None
+    assert cache.get(lock_key) is None # Lock should be released
