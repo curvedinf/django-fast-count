@@ -8,12 +8,15 @@ from unittest.mock import patch, MagicMock, call  # Added call
 from io import StringIO
 import os
 import time
+import subprocess  # Added for subprocess.DEVNULL
+import sys         # Added for sys.executable
 from django.db import models as django_models  # To avoid conflict with local 'models'
 from django_fast_count.models import FastCount
 from django_fast_count.managers import (
     FastCountManager,
     FastCountQuerySet,
-    DISABLE_FORK_ENV_VAR,
+    FORCE_SYNC_PRECACHE_ENV_VAR, # Updated env var name
+    _DISABLE_FORK_ENV_VAR_OLD_NAME, # For checking backward compatibility
 )
 from testapp.models import (
     ModelWithBadFastCountQuerysets,
@@ -26,24 +29,31 @@ from testapp.models import (
 # Pytest marker for DB access for all tests in this module
 pytestmark = pytest.mark.django_db
 
-
 @pytest.fixture(autouse=True)
-def clean_state_for_edge_cases():
+def clean_state_for_edge_cases(settings as django_settings):
     """Ensures a clean state for each test in this file."""
     cache.clear()
     FastCount.objects.all().delete()
     TestModel.objects.all().delete()
-    # Clean up instances of dynamically defined models if any were created
-    # This might require more specific cleanup if tests actually create instances
-    # For now, most tests mock interactions or use TestModel.
     ModelWithBadFastCountQuerysets.objects.all().delete()
     ModelWithDynamicallyAssignedManager.objects.all().delete()
     AnotherTestModel.objects.all().delete()
     ModelWithSimpleManager.objects.all().delete()
 
-    # Reset env var if set by tests
-    original_fork_setting = os.environ.pop(DISABLE_FORK_ENV_VAR, None)
+    # Store original BASE_DIR and environment variables
+    original_base_dir = getattr(django_settings, "BASE_DIR", None)
+    original_sync_setting = os.environ.pop(FORCE_SYNC_PRECACHE_ENV_VAR, None)
+    original_sync_setting_old = os.environ.pop(_DISABLE_FORK_ENV_VAR_OLD_NAME, None)
+
+    # Set BASE_DIR for tests that might need it (e.g., subprocess calls to manage.py)
+    # Use a sensible default like the current working directory if not already set,
+    # or a specific path if your test setup requires it.
+    # For tests, django_test_project_dir is typically the CWD for pytest.
+    django_settings.BASE_DIR = os.getcwd()
+
+
     yield
+
     cache.clear()
     FastCount.objects.all().delete()
     TestModel.objects.all().delete()
@@ -51,10 +61,22 @@ def clean_state_for_edge_cases():
     ModelWithDynamicallyAssignedManager.objects.all().delete()
     AnotherTestModel.objects.all().delete()
     ModelWithSimpleManager.objects.all().delete()
-    if original_fork_setting is not None:
-        os.environ[DISABLE_FORK_ENV_VAR] = original_fork_setting
-    elif DISABLE_FORK_ENV_VAR in os.environ:
-        del os.environ[DISABLE_FORK_ENV_VAR]
+
+    # Restore original BASE_DIR and environment variables
+    if original_base_dir is not None:
+        django_settings.BASE_DIR = original_base_dir
+    elif hasattr(django_settings, "BASE_DIR"):
+        delattr(django_settings, "BASE_DIR") # if it was set by this fixture
+
+    if original_sync_setting is not None:
+        os.environ[FORCE_SYNC_PRECACHE_ENV_VAR] = original_sync_setting
+    elif FORCE_SYNC_PRECACHE_ENV_VAR in os.environ:
+        del os.environ[FORCE_SYNC_PRECACHE_ENV_VAR]
+
+    if original_sync_setting_old is not None:
+        os.environ[_DISABLE_FORK_ENV_VAR_OLD_NAME] = original_sync_setting_old
+    elif _DISABLE_FORK_ENV_VAR_OLD_NAME in os.environ:
+        del os.environ[_DISABLE_FORK_ENV_VAR_OLD_NAME]
 
 
 def create_test_models_deterministic(flag_true_count=0, flag_false_count=0):
@@ -159,7 +181,6 @@ def test_precache_counts_handles_error_for_one_queryset(monkeypatch, capsys):
         results = qs_for_precache.precache_counts()
 
     captured = capsys.readouterr()
-
     qs_all = TestModel.objects.all()
     qs_true = TestModel.objects.filter(flag=True)
     qs_false = TestModel.objects.filter(flag=False)
@@ -206,7 +227,6 @@ def test_maybe_trigger_precache_lock_not_acquired(monkeypatch, capsys):
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = qs.manager_name
     model_name = qs.model.__name__
-
     monkeypatch.setattr(qs, "precache_count_every", timedelta(seconds=1))
     # Ensure last_run_key is old enough to trigger
     cache.set(
@@ -216,7 +236,6 @@ def test_maybe_trigger_precache_lock_not_acquired(monkeypatch, capsys):
         time.time() - qs.precache_count_every.total_seconds() * 2,
         timeout=None,
     )
-
     with patch(
         "django.core.cache.cache.add", return_value=False
     ) as mock_cache_add:  # Simulate lock not acquired
@@ -225,13 +244,12 @@ def test_maybe_trigger_precache_lock_not_acquired(monkeypatch, capsys):
     mock_cache_add.assert_called_once()
     captured = capsys.readouterr()
     assert (
-        f"Precache lock {qs._precache_lock_key_template.format(ct_id=model_ct.id, manager=manager_name)} not acquired. Process for {model_name} ({manager_name}) already running or recently finished/failed."
+        f"Precache lock {qs._precache_lock_key_template.format(ct_id=model_ct.id, manager=manager_name)} not acquired for {model_name} ({manager_name}). Process already running or recently finished/failed."
         in captured.out
     )
 
-
-def test_maybe_trigger_precache_synchronous_mode_success(monkeypatch, capsys):
-    os.environ[DISABLE_FORK_ENV_VAR] = "1"
+def test_maybe_trigger_precache_synchronous_mode_success(monkeypatch, capsys, settings as django_settings):
+    os.environ[FORCE_SYNC_PRECACHE_ENV_VAR] = "1"
     create_test_models_deterministic(flag_true_count=1)
     qs = TestModel.objects.all()
     model_ct = ContentType.objects.get_for_model(TestModel)
@@ -255,14 +273,14 @@ def test_maybe_trigger_precache_synchronous_mode_success(monkeypatch, capsys):
     with patch("time.time", return_value=current_time_ts):
         qs.maybe_trigger_precache()
 
-    mock_precache_counts_instance.assert_called_once_with()  # No manager_name argument
+    mock_precache_counts_instance.assert_called_once_with()
     captured = capsys.readouterr()
     assert (
-        f"SYNC_TEST_MODE: Forking disabled. Running precache_counts synchronously for {model_name} ({manager_name})."
+        f"SYNC_MODE: Running precache_counts synchronously for {model_name} ({manager_name})."
         in captured.out
     )
     assert (
-        f"SYNC_TEST_MODE: precache_counts finished synchronously for {model_name} ({manager_name})."
+        f"SYNC_MODE: precache_counts finished synchronously for {model_name} ({manager_name})."
         in captured.out
     )
 
@@ -270,14 +288,14 @@ def test_maybe_trigger_precache_synchronous_mode_success(monkeypatch, capsys):
         ct_id=model_ct.id, manager=manager_name
     )
     assert cache.get(last_run_key) == current_time_ts
+
     lock_key = qs._precache_lock_key_template.format(
         ct_id=model_ct.id, manager=manager_name
     )
     assert cache.get(lock_key) is None
 
-
-def test_maybe_trigger_precache_synchronous_mode_error(monkeypatch, capsys):
-    os.environ[DISABLE_FORK_ENV_VAR] = "1"
+def test_maybe_trigger_precache_synchronous_mode_error(monkeypatch, capsys, settings as django_settings):
+    os.environ[FORCE_SYNC_PRECACHE_ENV_VAR] = "1"
     create_test_models_deterministic(flag_true_count=1)
     qs = TestModel.objects.all()
     model_ct = ContentType.objects.get_for_model(TestModel)
@@ -303,35 +321,35 @@ def test_maybe_trigger_precache_synchronous_mode_error(monkeypatch, capsys):
     with patch("time.time", return_value=current_time_ts):
         qs.maybe_trigger_precache()
 
-    mock_precache_counts_instance.assert_called_once_with()  # No manager_name argument
+    mock_precache_counts_instance.assert_called_once_with()
     captured = capsys.readouterr()
-    assert "SYNC_TEST_MODE: Forking disabled." in captured.out
+    assert "SYNC_MODE: Running precache_counts synchronously" in captured.out
     assert (
-        f"SYNC_TEST_MODE: Error in synchronous precache_counts for {model_name} ({manager_name}): Sync precache error"
+        f"SYNC_MODE: Error in synchronous precache_counts for {model_name} ({manager_name}): Sync precache error"
         in captured.out
     )
 
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=manager_name
     )
-    assert cache.get(last_run_key) == initial_last_run_ts
+    assert cache.get(last_run_key) == initial_last_run_ts  # Should not be updated on error
+
     lock_key = qs._precache_lock_key_template.format(
         ct_id=model_ct.id, manager=manager_name
     )
     assert cache.get(lock_key) is None
 
-
-@patch("os.fork")
-@patch("os._exit")
-@patch("django.db.connections.close_all")
+@patch("subprocess.Popen")
 @patch("time.time")
-def test_maybe_trigger_precache_forking_parent_path(
-    mock_time, mock_close_all, mock_os_exit, mock_os_fork, monkeypatch, capsys
+def test_maybe_trigger_precache_subprocess_launch_success(
+    mock_time, mock_subprocess_popen, monkeypatch, capsys, settings as django_settings
 ):
+    # django_settings.BASE_DIR is set by the fixture
     initial_fixed_ts = 1678880000.0
     mock_time.return_value = initial_fixed_ts
-    if DISABLE_FORK_ENV_VAR in os.environ:
-        del os.environ[DISABLE_FORK_ENV_VAR]
+    os.environ.pop(FORCE_SYNC_PRECACHE_ENV_VAR, None) # Ensure not in sync mode
+    os.environ.pop(_DISABLE_FORK_ENV_VAR_OLD_NAME, None) # Ensure old var also not in sync mode
+
 
     create_test_models_deterministic(flag_true_count=1)
     qs = TestModel.objects.all()
@@ -344,87 +362,31 @@ def test_maybe_trigger_precache_forking_parent_path(
         qs._precache_last_run_key_template.format(
             ct_id=model_ct.id, manager=manager_name
         ),
-        0,
+        0, # Ensure it's due to run
         timeout=None,
     )
 
-    mock_os_fork.return_value = 12345  # Simulate parent process path
+    mock_process = MagicMock()
+    mock_process.pid = 12345
+    mock_subprocess_popen.return_value = mock_process
+
     current_ts_for_logic = 1678886400.0
     mock_time.return_value = current_ts_for_logic
 
     qs.maybe_trigger_precache()
 
-    mock_os_fork.assert_called_once()
-    mock_close_all.assert_not_called()
-    mock_os_exit.assert_not_called()
-    captured = capsys.readouterr()
-    assert (
-        f"Forked background precache process 12345 for {model_name} ({manager_name})."
-        in captured.out
+    expected_manage_py_path = os.path.join(django_settings.BASE_DIR, "manage.py")
+    expected_cmd = [sys.executable, expected_manage_py_path, "precache_fast_counts"]
+    mock_subprocess_popen.assert_called_once_with(
+        expected_cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True
     )
-
-    lock_key = qs._precache_lock_key_template.format(
-        ct_id=model_ct.id, manager=manager_name
-    )
-    assert cache.get(lock_key) == "running"
-
-
-@patch("os.fork")
-@patch("os._exit")
-@patch("django.db.connections.close_all")
-@patch("time.time")
-def test_maybe_trigger_precache_forking_child_path_success(
-    mock_time, mock_close_all, mock_os_exit, mock_os_fork, monkeypatch, capsys
-):
-    initial_fixed_ts = 1678880000.0
-    mock_time.return_value = initial_fixed_ts
-    if DISABLE_FORK_ENV_VAR in os.environ:
-        del os.environ[DISABLE_FORK_ENV_VAR]
-
-    create_test_models_deterministic(flag_true_count=1)
-    qs = TestModel.objects.all()  # Get QS instance first
-    model_ct = ContentType.objects.get_for_model(TestModel)
-    manager_name = qs.manager_name
-    model_name = qs.model.__name__
-
-    monkeypatch.setattr(qs, "precache_count_every", timedelta(seconds=1))
-    cache.set(
-        qs._precache_last_run_key_template.format(
-            ct_id=model_ct.id, manager=manager_name
-        ),
-        0,
-        timeout=None,
-    )
-
-    mock_precache_counts_on_instance = MagicMock()
-    monkeypatch.setattr(
-        qs, "precache_counts", mock_precache_counts_on_instance
-    )  # Patch on QS instance
-
-    mock_os_fork.return_value = 0  # Simulate child process path
-    child_pid = 54321
-    current_ts_for_logic = 1678886400.0
-    mock_time.return_value = current_ts_for_logic
-
-    with patch("os.getpid", return_value=child_pid):
-        qs.maybe_trigger_precache()
-
-    mock_os_fork.assert_called_once()
-    assert mock_close_all.call_count == 2  # Called twice in child process
-    mock_precache_counts_on_instance.assert_called_once_with()  # No manager_name argument
-    mock_os_exit.assert_called_once_with(0)
 
     captured = capsys.readouterr()
     assert (
-        f"Background precache process (PID {child_pid}) starting for {model_name} (manager: {manager_name}) using DB alias 'default'."
-        in captured.out
-    )
-    assert (
-        f"Background precache process (PID {child_pid}) for {model_name} (manager: {manager_name}) finished successfully."
-        in captured.out
-    )
-    assert (  # Check the log message for DB connection closure
-        f"Background precache process (PID {child_pid}) for {model_name} (manager: {manager_name}) closed its DB connections."
+        f"Launched background precache process (PID 12345) for {model_name} ({manager_name})."
         in captured.out
     )
 
@@ -432,81 +394,53 @@ def test_maybe_trigger_precache_forking_child_path_success(
         ct_id=model_ct.id, manager=manager_name
     )
     assert cache.get(last_run_key) == current_ts_for_logic
+
     lock_key = qs._precache_lock_key_template.format(
         ct_id=model_ct.id, manager=manager_name
     )
     assert cache.get(lock_key) is None
 
 
-@patch("os.fork")
-@patch("os._exit")
-@patch("django.db.connections.close_all")
 @patch("time.time")
-def test_maybe_trigger_precache_forking_child_path_error(
-    mock_time, mock_close_all, mock_os_exit, mock_os_fork, monkeypatch, capsys
+@patch("subprocess.Popen")
+def test_maybe_trigger_precache_subprocess_launch_error(
+    mock_subprocess_popen, mock_time, monkeypatch, capsys, settings as django_settings
 ):
+    # django_settings.BASE_DIR is set by the fixture
     initial_fixed_ts = 1678880000.0
     mock_time.return_value = initial_fixed_ts
-    if DISABLE_FORK_ENV_VAR in os.environ:
-        del os.environ[DISABLE_FORK_ENV_VAR]
+    os.environ.pop(FORCE_SYNC_PRECACHE_ENV_VAR, None)
+    os.environ.pop(_DISABLE_FORK_ENV_VAR_OLD_NAME, None)
+
 
     create_test_models_deterministic(flag_true_count=1)
-    qs = TestModel.objects.all()  # Get QS instance first
+    qs = TestModel.objects.all()
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = qs.manager_name
     model_name = qs.model.__name__
 
     monkeypatch.setattr(qs, "precache_count_every", timedelta(seconds=1))
     original_last_run_time_value = 0
-    cache.set(
-        qs._precache_last_run_key_template.format(
-            ct_id=model_ct.id, manager=manager_name
-        ),
-        original_last_run_time_value,
-        timeout=None,
-    )
+    last_run_key = qs._precache_last_run_key_template.format(ct_id=model_ct.id, manager=manager_name)
+    cache.set(last_run_key, original_last_run_time_value, timeout=None)
 
-    mock_precache_counts_on_instance = MagicMock(
-        side_effect=Exception("Child precache error")
-    )
-    monkeypatch.setattr(
-        qs, "precache_counts", mock_precache_counts_on_instance
-    )  # Patch on QS instance
+    mock_subprocess_popen.side_effect = Exception("Subprocess launch failed")
 
-    mock_os_fork.return_value = 0  # Simulate child process path
-    child_pid = 54321
-    current_ts_for_logic = 1678886400.0
+    current_ts_for_logic = 1678886400.0 # This time won't be set for last_run_key
     mock_time.return_value = current_ts_for_logic
 
-    with patch("os.getpid", return_value=child_pid):
-        qs.maybe_trigger_precache()
+    qs.maybe_trigger_precache()
 
-    mock_os_fork.assert_called_once()
-    assert mock_close_all.call_count == 2  # Called twice in child process
-    mock_precache_counts_on_instance.assert_called_once_with()  # No manager_name argument
-    mock_os_exit.assert_called_once_with(1)
-
+    mock_subprocess_popen.assert_called_once()
     captured = capsys.readouterr()
     assert (
-        f"Background precache process (PID {child_pid}) starting for {model_name} (manager: {manager_name}) using DB alias 'default'."
-        in captured.out
-    )
-    assert (
-        f"Background precache process (PID {child_pid}) for {model_name} (manager: {manager_name}) failed: Child precache error"
-        in captured.out
-    )
-    assert (  # Check the log message for DB connection closure
-        f"Background precache process (PID {child_pid}) for {model_name} (manager: {manager_name}) closed its DB connections."
+        f"Error launching background precache command for {model_name} ({manager_name}): Subprocess launch failed"
         in captured.out
     )
 
-    last_run_key = qs._precache_last_run_key_template.format(
-        ct_id=model_ct.id, manager=manager_name
-    )
     assert cache.get(last_run_key) == original_last_run_time_value
-    lock_key = qs._precache_lock_key_template.format(
-        ct_id=model_ct.id, manager=manager_name
-    )
+
+    lock_key = qs._precache_lock_key_template.format(ct_id=model_ct.id, manager=manager_name)
     assert cache.get(lock_key) is None
 
 
@@ -524,22 +458,21 @@ def test_precache_command_no_fastcount_managers(capsys):
 
 def test_precache_command_handles_error_in_manager_precache(monkeypatch, capsys):
     create_test_models_deterministic(flag_true_count=1)
-    # Assuming the command precache_fast_counts calls qs.precache_counts()
-    # We need to patch FastCountQuerySet.precache_counts
     original_qs_precache_counts_method = FastCountQuerySet.precache_counts
 
     def faulty_precache_counts(self_qs):  # self_qs is the FastCountQuerySet instance
         results = original_qs_precache_counts_method(self_qs)
-        if results:
+        if results: # Make sure results is not empty
             first_key = list(results.keys())[0]
             results[first_key] = "Simulated Error during precache"
         return results
 
     monkeypatch.setattr(FastCountQuerySet, "precache_counts", faulty_precache_counts)
+
     stdout_capture = StringIO()
     call_command("precache_fast_counts", stdout=stdout_capture)
-
     captured_out = stdout_capture.getvalue()
+
     assert (
         f"Processing: testapp.{TestModel.__name__} (manager: 'objects')" in captured_out
     )
