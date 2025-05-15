@@ -22,55 +22,45 @@ from django.db import models as django_models
 pytestmark = pytest.mark.django_db
 
 @pytest.fixture(autouse=True)
-def clean_state_and_env_and_settings(settings as django_settings):
+def clean_state_and_env_and_settings(settings):
     """Ensures a clean state for each test."""
     cache.clear()
     FastCount.objects.all().delete()
     TestModel.objects.all().delete()
-
     original_sync_setting = os.environ.pop(FORCE_SYNC_PRECACHE_ENV_VAR, None)
     original_sync_setting_old = os.environ.pop(_DISABLE_FORK_ENV_VAR_OLD_NAME, None)
-    original_base_dir = getattr(django_settings, "BASE_DIR", None)
-
+    original_base_dir = getattr(settings, "BASE_DIR", None)
     # Set a mock BASE_DIR for tests that rely on it for subprocess calls
-    django_settings.BASE_DIR = os.getcwd()
-
-
+    settings.BASE_DIR = os.getcwd()
     yield
-
     cache.clear()
     FastCount.objects.all().delete()
     TestModel.objects.all().delete()
-
     if original_sync_setting is not None:
         os.environ[FORCE_SYNC_PRECACHE_ENV_VAR] = original_sync_setting
     elif FORCE_SYNC_PRECACHE_ENV_VAR in os.environ:
         del os.environ[FORCE_SYNC_PRECACHE_ENV_VAR]
-
     if original_sync_setting_old is not None:
         os.environ[_DISABLE_FORK_ENV_VAR_OLD_NAME] = original_sync_setting_old
     elif _DISABLE_FORK_ENV_VAR_OLD_NAME in os.environ:
         del os.environ[_DISABLE_FORK_ENV_VAR_OLD_NAME]
 
     if original_base_dir is not None:
-        django_settings.BASE_DIR = original_base_dir
-    elif hasattr(django_settings, "BASE_DIR"):
-        delattr(django_settings, "BASE_DIR")
-
+        settings.BASE_DIR = original_base_dir
+    elif hasattr(settings, "BASE_DIR"):
+        delattr(settings, "BASE_DIR")
 
 def create_test_models(count=1, flag=True):
     TestModel.objects.bulk_create([TestModel(flag=flag) for _ in range(count)])
 
-
 # --- Tests for src/django_fast_count/management/commands/precache_fast_counts.py ---
+
 # Define a sacrificial model for the manager discovery fallback test
 class FallbackDiscoveryTestModel(django_models.Model):
     objects = django_models.Manager()  # Will be replaced
-
     class Meta:
         app_label = "testapp_fb_discover"
         managed = False
-
 
 def test_precache_command_manager_discovery_fallback(capsys, monkeypatch):
     """
@@ -94,13 +84,13 @@ def test_precache_command_manager_discovery_fallback(capsys, monkeypatch):
             "django.apps.apps.get_models", return_value=[FallbackDiscoveryTestModel]
         ):
             call_command("precache_fast_counts")
+
     captured = capsys.readouterr()
     assert (
         f"Processing: {FallbackDiscoveryTestModel._meta.app_label}.{FallbackDiscoveryTestModel.__name__} (manager: 'objects')"
         in captured.out
     )
     mock_qs_precache.assert_called_once()
-
 
 def test_precache_command_general_error_in_manager_processing(capsys, monkeypatch):
     """
@@ -126,8 +116,8 @@ def test_precache_command_general_error_in_manager_processing(capsys, monkeypatc
     # So mock_qs_precache should have been called.
     assert mock_qs_precache.called
 
-
 # --- Tests for src/django_fast_count/managers.py ---
+
 def test_fcqs_count_db_cache_generic_error(monkeypatch, capsys):
     """
     Covers error print in FastCountQuerySet.count()
@@ -165,7 +155,6 @@ def test_fcqs_count_db_cache_generic_error(monkeypatch, capsys):
         in captured.out
     )
 
-
 def test_fcqs_count_retroactive_cache_db_error(monkeypatch, capsys):
     """
     Covers error print in FastCountQuerySet.count()
@@ -202,7 +191,6 @@ def test_fcqs_count_retroactive_cache_db_error(monkeypatch, capsys):
         in captured.out
     )
     assert not FastCount.objects.filter(queryset_hash=cache_key).exists()
-
 
 def test_fcmanager_init_precache_lock_timeout_types():
     """
@@ -268,12 +256,12 @@ def test_fcqs_get_precache_querysets_other_typeerror(capsys):
 
 
 @patch("subprocess.Popen")
-def test_fcqs_maybe_trigger_precache_subprocess_launch_oserror(mock_subprocess_popen, monkeypatch, capsys, settings as django_settings):
+def test_fcqs_maybe_trigger_precache_subprocess_launch_oserror(mock_subprocess_popen, monkeypatch, capsys, settings):
     """
     Covers error print in FastCountQuerySet.maybe_trigger_precache()
     when subprocess.Popen() raises OSError.
     """
-    # django_settings.BASE_DIR is set by the fixture
+    # settings.BASE_DIR is set by the fixture
     os.environ.pop(FORCE_SYNC_PRECACHE_ENV_VAR, None) # Ensure not sync mode
     os.environ.pop(_DISABLE_FORK_ENV_VAR_OLD_NAME, None) # Ensure old var not sync mode
 
@@ -294,7 +282,6 @@ def test_fcqs_maybe_trigger_precache_subprocess_launch_oserror(mock_subprocess_p
 
     qs.maybe_trigger_precache()
     captured = capsys.readouterr()
-
     assert (
         f"Error launching background precache command for {model_name} ({qs.manager_name}): Subprocess launch OSError"
         in captured.out
@@ -305,12 +292,12 @@ def test_fcqs_maybe_trigger_precache_subprocess_launch_oserror(mock_subprocess_p
     assert cache.get(lock_key) is None # Lock should be released
 
 
-def test_fcqs_maybe_trigger_precache_outer_exception(monkeypatch, capsys, settings as django_settings):
+def test_fcqs_maybe_trigger_precache_outer_exception(monkeypatch, capsys, settings):
     """
     Covers outer try-except block in FastCountQuerySet.maybe_trigger_precache()
     catching an unexpected error that is not a Popen launch error.
     """
-    # django_settings.BASE_DIR is set by the fixture
+    # settings.BASE_DIR is set by the fixture
     os.environ.pop(FORCE_SYNC_PRECACHE_ENV_VAR, None) # Ensure not sync mode
     os.environ.pop(_DISABLE_FORK_ENV_VAR_OLD_NAME, None) # Ensure old var not sync mode
 
@@ -319,7 +306,6 @@ def test_fcqs_maybe_trigger_precache_outer_exception(monkeypatch, capsys, settin
     qs = manager.all()
     model_name = qs.model.__name__
     model_ct = ContentType.objects.get_for_model(qs.model)
-
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=qs.manager_name
     )
