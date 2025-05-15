@@ -1,15 +1,13 @@
 import pytest
 from django.core.cache import cache
 from django.utils import timezone
-import datetime  # Added for datetime.timezone.utc
 from datetime import timedelta
 from django.contrib.contenttypes.models import ContentType
 from django.core.management import call_command
-from unittest.mock import patch, MagicMock, ANY, PropertyMock
+from unittest.mock import patch, MagicMock
 from io import StringIO
 import os
 import time
-import builtins  # Import builtins at the module level or ensure it's imported in test_precache_command_manager_discovery_fallback before use
 from django.db import models as django_models  # To avoid conflict with local 'models'
 from django_fast_count.models import FastCount
 from django_fast_count.managers import (

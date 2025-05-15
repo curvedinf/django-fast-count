@@ -1,14 +1,11 @@
 import pytest
 from django.core.cache import cache
-from django.utils import timezone
 from datetime import timedelta
 from django.contrib.contenttypes.models import ContentType
 from django.core.management import call_command
-from unittest.mock import patch, MagicMock, ANY
+from unittest.mock import patch, MagicMock
 from io import StringIO
 import os
-import time  # For time.time mocking
-import builtins  # For patching getattr
 from testapp.models import TestModel
 from django_fast_count.models import FastCount
 from django_fast_count.managers import (
@@ -17,7 +14,6 @@ from django_fast_count.managers import (
     DISABLE_FORK_ENV_VAR,
 )
 from django.db import models as django_models
-from django.apps import apps as django_apps  # For patching get_models
 
 # Pytest marker for DB access
 pytestmark = pytest.mark.django_db

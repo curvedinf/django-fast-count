@@ -63,9 +63,9 @@ class YourModel(Model):
 
     # By default, only .all() is precached
     objects = FastCountModelManager(
-        precache_count_every=timedelta(hours=1), # Defaults to 10 minutes
-        cache_counts_larger_than=100_000, # Defaults to 1,000,000
-        expire_cached_counts_after=timedelta(hours=1), # Defaults to 10 minutes
+        precache_count_every=timedelta(hours=1),  # Defaults to 10 minutes
+        cache_counts_larger_than=100_000,  # Defaults to 1,000,000
+        expire_cached_counts_after=timedelta(hours=1),  # Defaults to 10 minutes
     )
 
     # To cache additional querysets, override the `fast_count_querysets`
