@@ -14,11 +14,6 @@ from django.contrib.contenttypes.models import ContentType
 DEFAULT_PRECACHE_COUNT_EVERY = timedelta(minutes=10)
 DEFAULT_CACHE_COUNTS_LARGER_THAN = 1_000_000
 DEFAULT_EXPIRE_CACHED_COUNTS_AFTER = timedelta(minutes=10)
-# Lock timeout slightly longer than default precache interval to prevent stale locks
-# but short enough to recover if a process dies.
-DEFAULT_PRECACHE_LOCK_TIMEOUT_SECONDS = int(
-    DEFAULT_PRECACHE_COUNT_EVERY.total_seconds() * 1.5
-)
 
 # Environment variable to disable forking, useful for testing
 DISABLE_FORK_ENV_VAR = "DJANGO_FAST_COUNT_DISABLE_FORK_FOR_TESTING"
@@ -32,14 +27,6 @@ class FastCountQuerySet(QuerySet):
 
     # The manager instance will be attached here by FastCountModelManager.get_queryset
     manager = None
-
-    def _clone(self, **kwargs):
-        """
-        Ensure that the custom 'manager' attribute is propagated when cloning.
-        """
-        clone = super()._clone(**kwargs)
-        clone.manager = self.manager
-        return clone
 
     def _get_manager_name(self):
         """Tries to find the name this manager instance is assigned to on the model."""
@@ -82,7 +69,6 @@ class FastCountQuerySet(QuerySet):
         cache_key = self.manager._get_cache_key(self)
         model_ct = ContentType.objects.get_for_model(self.model)
         now = timezone.now()
-        calculated_count = None
 
         # 1. Check Django's cache
         cached_count = cache.get(cache_key)
@@ -127,7 +113,6 @@ class FastCountQuerySet(QuerySet):
         # 3. Perform actual count using the database
         # Use super().count() to call the original QuerySet count method
         actual_count = super().count()
-        calculated_count = actual_count  # Store for potential retroactive cache
 
         # Trigger potential precache *after* calculating the actual count
         # We do this regardless of whether we cache retroactively
