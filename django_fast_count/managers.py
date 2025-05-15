@@ -8,34 +8,99 @@ from django.db.models import Manager
 from django.db.models.query import QuerySet
 from django.utils import timezone
 from django.contrib.contenttypes.models import ContentType
+
 # Avoid circular import by importing late or using string reference if needed
 # from .models import FastCount
+
 DEFAULT_PRECACHE_COUNT_EVERY = timedelta(minutes=10)
 DEFAULT_CACHE_COUNTS_LARGER_THAN = 1_000_000
 DEFAULT_EXPIRE_CACHED_COUNTS_AFTER = timedelta(minutes=10)
 # Environment variable to disable forking, useful for testing
 DISABLE_FORK_ENV_VAR = "DJANGO_FAST_COUNT_DISABLE_FORK_FOR_TESTING"
+
+
 class FastCountQuerySet(QuerySet):
     """
     A QuerySet subclass that overrides count() to use cached values and
     potentially trigger background precaching.
     It also encapsulates the logic for precaching and cache key generation.
     """
+
     def __init__(self, model=None, query=None, using=None, hints=None,
+                 manager_instance=None,  # New primary way to configure
+                 # Direct config/override kwargs:
                  manager_name=None,
                  precache_count_every=None,
                  cache_counts_larger_than=None,
                  expire_cached_counts_after=None,
                  precache_lock_timeout=None):
-        super().__init__(model, query, using, hints)
-        self.manager_name = manager_name
-        self.precache_count_every = precache_count_every
-        self.cache_counts_larger_than = cache_counts_larger_than
-        self.expire_cached_counts_after = expire_cached_counts_after
-        self.precache_lock_timeout = precache_lock_timeout
+
+        actual_model = model
+        actual_using = using
+
+        # Tentative values for FC settings from direct kwargs
+        actual_manager_name = manager_name
+        actual_precache_count_every = precache_count_every
+        actual_cache_counts_larger_than = cache_counts_larger_than
+        actual_expire_cached_counts_after = expire_cached_counts_after
+        actual_precache_lock_timeout = precache_lock_timeout
+
+        if manager_instance:
+            actual_model = manager_instance.model  # manager_instance dictates model/using
+            actual_using = manager_instance._db
+
+            # If direct kwargs were None (not explicitly passed to override), populate from manager_instance.
+            # The manager_instance attributes (e.g., manager_instance.precache_count_every)
+            # are already defaulted by FastCountManager.__init__.
+            if actual_manager_name is None:
+                actual_manager_name = manager_instance._get_own_name_on_model()
+            if actual_precache_count_every is None:
+                actual_precache_count_every = manager_instance.precache_count_every
+            if actual_cache_counts_larger_than is None:
+                actual_cache_counts_larger_than = manager_instance.cache_counts_larger_than
+            if actual_expire_cached_counts_after is None:
+                actual_expire_cached_counts_after = manager_instance.expire_cached_counts_after
+            if actual_precache_lock_timeout is None:
+                actual_precache_lock_timeout = manager_instance.precache_lock_timeout
+        else:
+            # No manager_instance provided, rely purely on direct kwargs or apply library defaults.
+            # Apply DEFAULT_XXX constants if the corresponding kwarg was None.
+            if actual_precache_count_every is None:
+                actual_precache_count_every = DEFAULT_PRECACHE_COUNT_EVERY
+            if actual_cache_counts_larger_than is None:
+                actual_cache_counts_larger_than = DEFAULT_CACHE_COUNTS_LARGER_THAN
+            if actual_expire_cached_counts_after is None:
+                actual_expire_cached_counts_after = DEFAULT_EXPIRE_CACHED_COUNTS_AFTER
+
+            # Special defaulting for precache_lock_timeout if not provided by manager_instance or direct kwarg
+            if actual_precache_lock_timeout is None:
+                # Use already determined actual_precache_count_every for calculation
+                interval_for_lock_calc = actual_precache_count_every
+                actual_precache_lock_timeout = max(
+                    300, int(interval_for_lock_calc.total_seconds() * 1.5)
+                )
+            elif isinstance(actual_precache_lock_timeout, timedelta):
+                actual_precache_lock_timeout = int(actual_precache_lock_timeout.total_seconds())
+            else:  # Assuming int
+                actual_precache_lock_timeout = int(actual_precache_lock_timeout)
+
+        # Critical for QuerySet base class
+        if actual_model is None:
+            raise TypeError("FastCountQuerySet initialized without 'model' or 'manager_instance'.")
+
+        super().__init__(actual_model, query, actual_using, hints)
+
+        # Final assignment to self
+        self.manager_name = actual_manager_name
+        self.precache_count_every = actual_precache_count_every
+        self.cache_counts_larger_than = actual_cache_counts_larger_than
+        self.expire_cached_counts_after = actual_expire_cached_counts_after
+        self.precache_lock_timeout = actual_precache_lock_timeout
+
         # Cache key templates, dependent on manager_name which is now part of QS state
         self._precache_last_run_key_template = "fastcount:last_precache:{ct_id}:{manager}"
         self._precache_lock_key_template = "fastcount:lock_precache:{ct_id}:{manager}"
+
     def _clone(self, **kwargs):
         """
         Create a clone of this QuerySet, ensuring that custom FastCount attributes
@@ -47,23 +112,31 @@ class FastCountQuerySet(QuerySet):
         # If type(self) in super()._clone() calls our __init__ with these args,
         # this might be redundant for some, but it's safer to ensure they are set.
         # However, QuerySet._clone typically calls type(self)(...) without these custom kwargs.
-        if hasattr(self, "manager_name"):  # Check if source has it
-            clone.manager_name = self.manager_name
-        if hasattr(self, "precache_count_every"):
-            clone.precache_count_every = self.precache_count_every
-        if hasattr(self, "cache_counts_larger_than"):
-            clone.cache_counts_larger_than = self.cache_counts_larger_than
-        if hasattr(self, "expire_cached_counts_after"):
-            clone.expire_cached_counts_after = self.expire_cached_counts_after
-        if hasattr(self, "precache_lock_timeout"):
-            clone.precache_lock_timeout = self.precache_lock_timeout
-        # Ensure key templates are also on the clone, though they are usually
-        # set in __init__ and should be there if clone is of type(self).
-        if not hasattr(clone, "_precache_last_run_key_template"):
-            clone._precache_last_run_key_template = "fastcount:last_precache:{ct_id}:{manager}"
-        if not hasattr(clone, "_precache_lock_key_template"):
-            clone._precache_lock_key_template = "fastcount:lock_precache:{ct_id}:{manager}"
+
+        # Pass all FastCount specific attributes to the clone's constructor.
+        # This ensures the clone is also a fully configured FastCountQuerySet.
+        # Note: _clone calls type(self)(model, query, using, hints). We are adding our custom args.
+        # Django's QuerySet._clone calls:
+        # klass = kwargs.pop("__klass", type(self))
+        # c = klass(model=self.model, query=self.query.chain(klass=klass), using=self._db, hints=self._hints)
+        # So our custom __init__ needs to handle being called by _clone as well.
+        # The current __init__ design should handle this: `model` and `using` will be passed by _clone.
+        # The fc_settings will be None unless explicitly passed in kwargs to _clone itself (which we don't do here).
+        # However, we want the clone to *inherit* these from the original.
+        # So, we explicitly set them on the clone after super()._clone() has created it.
+        # This is safer than trying to inject into kwargs for _clone's internal call to type(self).
+
+        clone.manager_name = self.manager_name
+        clone.precache_count_every = self.precache_count_every
+        clone.cache_counts_larger_than = self.cache_counts_larger_than
+        clone.expire_cached_counts_after = self.expire_cached_counts_after
+        clone.precache_lock_timeout = self.precache_lock_timeout
+
+        # Ensure key templates are also on the clone
+        clone._precache_last_run_key_template = self._precache_last_run_key_template
+        clone._precache_lock_key_template = self._precache_lock_key_template
         return clone
+
     def _get_cache_key(self, queryset_to_key=None):
         """
         Generates a unique and stable cache key for a given queryset based on
@@ -88,6 +161,7 @@ class FastCountQuerySet(QuerySet):
                 f"{qs_for_key.model.__module__}.{qs_for_key.model.__name__}:{repr(qs_for_key.query)}"
             )
             return f"fallback:{hashlib.md5(key_string.encode('utf-8')).hexdigest()}"
+
     def get_precache_querysets(self):
         """
         Retrieves the list of querysets designated for precaching counts.
@@ -95,16 +169,17 @@ class FastCountQuerySet(QuerySet):
         and adds any querysets returned by the model's `fast_count_querysets` method.
         """
         # Create a base .all() queryset using this QuerySet's type and configuration.
-        # This will call __init__ for FastCountQuerySet, properly setting attributes.
         base_all_qs = type(self)(
-            model=self.model,
+            model=self.model,  # Pass model and using for clarity for type(self) call
             using=self.db,
+            manager_instance=None,  # Explicitly None, rely on direct fc_settings from self
             manager_name=self.manager_name,
             precache_count_every=self.precache_count_every,
             cache_counts_larger_than=self.cache_counts_larger_than,
             expire_cached_counts_after=self.expire_cached_counts_after,
             precache_lock_timeout=self.precache_lock_timeout
         ).all()  # .all() will then call _clone, which now propagates these attrs.
+
         querysets_to_precache = [base_all_qs]
         method = getattr(self.model, "fast_count_querysets", None)
         if method and callable(method):
@@ -127,13 +202,14 @@ class FastCountQuerySet(QuerySet):
                     )
                 else:
                     print(
-                        f"Error calling fast_count_querysets for {self.model.__name__}: {e}"
+                        f"Error calling or processing fast_count_querysets for {self.model.__name__}: {e}"
                     )
             except Exception as e:
                 print(
                     f"Error calling or processing fast_count_querysets for {self.model.__name__}: {e}"
                 )
         return querysets_to_precache
+
     def precache_counts(self):
         """
         Calculates and caches counts for all designated precache querysets.
@@ -152,6 +228,7 @@ class FastCountQuerySet(QuerySet):
                 f"with missing configuration. Aborting precache for this queryset/manager."
             )
             return {}
+
         model_ct = ContentType.objects.get_for_model(self.model)
         querysets = self.get_precache_querysets()
         now = timezone.now()
@@ -167,6 +244,7 @@ class FastCountQuerySet(QuerySet):
                 print(
                     f"Warning: Skipping a queryset in precache_counts for {self.model.__name__} due to missing manager_name configuration on it.")
                 continue
+
             cache_key = self._get_cache_key(qs_to_precache)
             try:
                 # Use a basic QuerySet for the actual count to avoid recursion or unintended side effects
@@ -176,6 +254,7 @@ class FastCountQuerySet(QuerySet):
                     model=qs_to_precache.model, query=qs_to_precache.query.clone(), using=qs_to_precache.db
                 )
                 actual_count = base_qs_for_count.count()
+
                 FastCount.objects.using(self.db).update_or_create(
                     content_type=model_ct,
                     manager_name=qs_to_precache.manager_name,  # Use manager_name from the specific qs being processed
@@ -203,6 +282,7 @@ class FastCountQuerySet(QuerySet):
             f"Precaching finished for {model_ct} (manager: {self.manager_name}). {len(results)} querysets processed."
         )
         return results
+
     def maybe_trigger_precache(self):
         """
         Checks if enough time has passed since the last precache run for this
@@ -217,6 +297,7 @@ class FastCountQuerySet(QuerySet):
         ]):
             # Don't attempt to trigger precache if config is missing.
             return
+
         model_ct = ContentType.objects.get_for_model(self.model)
         last_run_key = self._precache_last_run_key_template.format(
             ct_id=model_ct.id, manager=self.manager_name
@@ -224,18 +305,22 @@ class FastCountQuerySet(QuerySet):
         lock_key = self._precache_lock_key_template.format(
             ct_id=model_ct.id, manager=self.manager_name
         )
+
         now_ts = time.time()
         last_run_ts = cache.get(last_run_key)
+
         if last_run_ts and (
                 now_ts < last_run_ts + self.precache_count_every.total_seconds()
         ):
             return
+
         lock_acquired = cache.add(lock_key, "running", self.precache_lock_timeout)
         if not lock_acquired:
             print(
                 f"Precache lock {lock_key} not acquired. Process for {model_ct} ({self.manager_name}) already running or recently finished/failed."
             )
             return
+
         try:
             if os.environ.get(DISABLE_FORK_ENV_VAR):
                 print(
@@ -258,6 +343,7 @@ class FastCountQuerySet(QuerySet):
                 if sync_error:
                     pass  # Optionally re-raise
                 return
+
             pid = os.fork()
             if pid > 0:  # Parent process
                 print(
@@ -295,6 +381,7 @@ class FastCountQuerySet(QuerySet):
                 f"Unexpected error during precache trigger for {model_ct} ({self.manager_name}): {e}"
             )
             cache.delete(lock_key)
+
     def count(self):
         """
         Provides a count of objects matching the QuerySet, potentially using
@@ -304,6 +391,7 @@ class FastCountQuerySet(QuerySet):
         Triggers background precaching if configured and needed.
         """
         from .models import FastCount  # Dynamically import to avoid circular dependency
+
         if not all([
             hasattr(self, 'manager_name') and self.manager_name,  # Check attribute existence first
             hasattr(self, 'precache_count_every') and self.precache_count_every is not None,
@@ -312,20 +400,21 @@ class FastCountQuerySet(QuerySet):
             hasattr(self, 'precache_lock_timeout') and self.precache_lock_timeout is not None
         ]):
             # If essential configurations are missing, fall back to default count.
-            # This might happen if FastCountQuerySet is instantiated directly without proper setup,
-            # or if _clone didn't work as expected.
             print(
                 f"Warning: FastCountQuerySet for {self.model.__name__} is missing configuration. Falling back to standard count."
             )
             return super().count()
+
         cache_key = self._get_cache_key()  # Uses `self` as the queryset
         model_ct = ContentType.objects.get_for_model(self.model)
         now = timezone.now()
+
         # 1. Check Django's cache
         cached_count = cache.get(cache_key)
         if cached_count is not None:
             self.maybe_trigger_precache()
             return cached_count
+
         # 2. Check DB cache (FastCount model)
         try:
             db_cache_entry = FastCount.objects.using(self.db).get(
@@ -350,9 +439,11 @@ class FastCountQuerySet(QuerySet):
                 f"Error checking FastCount DB cache for {self.model.__name__} ({self.manager_name}, {cache_key}): {e}"
             )
             pass  # Fall through to actual count
+
         # 3. Perform actual count using the database
         actual_count = super().count()
         self.maybe_trigger_precache()
+
         # 4. Retroactively cache if the count meets the threshold
         if actual_count >= self.cache_counts_larger_than:
             expiry_time = now + self.expire_cached_counts_after
@@ -376,11 +467,14 @@ class FastCountQuerySet(QuerySet):
             if expires_seconds > 0:
                 cache.set(cache_key, actual_count, int(expires_seconds))
         return actual_count
+
+
 class FastCountManager(Manager):
     """
     A model manager that returns FastCountQuerySet instances, configured
     for fast counting and background precaching.
     """
+
     def __init__(
             self,
             precache_count_every=None,
@@ -415,6 +509,7 @@ class FastCountManager(Manager):
             self.precache_lock_timeout = int(precache_lock_timeout.total_seconds())
         else:
             self.precache_lock_timeout = int(precache_lock_timeout)
+
     def _get_own_name_on_model(self):
         """Tries to find the name this manager instance is assigned to on its model."""
         if hasattr(self, "model") and self.model:
@@ -437,20 +532,22 @@ class FastCountManager(Manager):
             f"Warning: Could not determine manager name for {model_name_str} (manager instance: {self}). Falling back to 'objects'."
         )
         return "objects"  # Fallback default
+
     def get_queryset(self):
         """
-        Returns an instance of FastCountQuerySet, configured with this manager's settings.
+        Returns an instance of FastCountQuerySet (or a subclass specified by
+        the manager, e.g., in a testapp), configured by this manager.
+        Derived managers should override this method to return their specific
+        QuerySet class, passing `manager_instance=self`.
+        e.g., `return MyCustomFastCountQuerySet(manager_instance=self)`
         """
-        manager_name = self._get_own_name_on_model()
-        return FastCountQuerySet(
-            self.model,
-            using=self._db,
-            manager_name=manager_name,
-            precache_count_every=self.precache_count_every,
-            cache_counts_larger_than=self.cache_counts_larger_than,
-            expire_cached_counts_after=self.expire_cached_counts_after,
-            precache_lock_timeout=self.precache_lock_timeout
-        )
+        # This default implementation returns FastCountQuerySet.
+        # Subclasses of FastCountManager that use a different QuerySet class
+        # (like IntermediateFastCountManager using IntermediateFastCountQuerySet)
+        # should override get_queryset to instantiate their specific QuerySet class,
+        # passing `manager_instance=self` to its constructor.
+        return FastCountQuerySet(manager_instance=self)
+
     # The count() method on the manager itself is convenient.
     # It will use the configured FastCountQuerySet's count method.
     def count(self):

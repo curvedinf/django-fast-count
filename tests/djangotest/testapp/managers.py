@@ -19,11 +19,11 @@ class IntermediateFastCountManager(FastCountManager):
     An intermediate Manager inheriting from FastCountManager.
     """
     def get_queryset(self):
-        return IntermediateFastCountQuerySet(self.model, using=self._db)
+        return IntermediateFastCountQuerySet(self.model, using=self._db, manager_instance=self)
 
 class DeepFastCountManager(IntermediateFastCountManager):
     """
     A Manager inheriting from IntermediateFastCountManager.
     """
     def get_queryset(self):
-        return DeepFastCountQuerySet(self.model, using=self._db)
+        return DeepFastCountQuerySet(self.model, using=self._db, manager_instance=self)
