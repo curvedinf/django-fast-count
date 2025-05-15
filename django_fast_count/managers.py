@@ -19,6 +19,7 @@ DEFAULT_EXPIRE_CACHED_COUNTS_AFTER = timedelta(minutes=10)
 DEFAULT_PRECACHE_LOCK_TIMEOUT_SECONDS = int(
     DEFAULT_PRECACHE_COUNT_EVERY.total_seconds() * 1.5
 )
+
 # Environment variable to disable forking, useful for testing
 DISABLE_FORK_ENV_VAR = "DJANGO_FAST_COUNT_DISABLE_FORK_FOR_TESTING"
 
@@ -73,8 +74,8 @@ class FastCountQuerySet(QuerySet):
         # Dynamically import FastCount to avoid circular dependency issues at import time
         from .models import FastCount
 
-        if not self.manager or not isinstance(self.manager, FastCountModelManager):
-            # Fallback to default count if manager is not set or not the right type
+        if not self.manager or not issubclass(type(self.manager), FastCountModelManager):
+            # Fallback to default count if manager is not set or not the right type/subclass
             return super().count()
 
         manager_name = self._get_manager_name()
@@ -254,9 +255,9 @@ class FastCountModelManager(models.Manager):
         Retrieves the list of querysets designated for precaching counts.
         Starts with the default `.all()` queryset and adds any querysets returned
         by the model's `fast_count_querysets` method (if defined).
+
         Expects `fast_count_querysets` to be defined on the model, potentially
         as an instance method, classmethod, or staticmethod.
-
         ```python
         # As instance method (receives self=model instance, but usually not needed)
         # Use `self.__class__.objects` or specific manager name if needed
@@ -281,7 +282,6 @@ class FastCountModelManager(models.Manager):
 
         # Check for the custom method on the model class
         method = getattr(self.model, "fast_count_querysets", None)
-
         if method and callable(method):
             try:
                 # Call the method. It could be instance, class, or static.
@@ -359,11 +359,9 @@ class FastCountModelManager(models.Manager):
                         "is_precached": True,  # Mark as precached
                     },
                 )
-
                 # Store/update in Django cache
                 if expires_seconds > 0:
                     cache.set(cache_key, actual_count, int(expires_seconds))
-
                 results[cache_key] = actual_count
                 print(
                     f"  - Precached {model_ct} ({manager_name}) hash {cache_key[:8]}...: {actual_count}"
@@ -395,6 +393,7 @@ class FastCountModelManager(models.Manager):
         lock_key = self._precache_lock_key_template.format(
             ct_id=model_ct.id, manager=manager_name
         )
+
         now_ts = time.time()  # Use timestamp for interval checks
         last_run_ts = cache.get(last_run_key)
 
