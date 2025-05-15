@@ -217,8 +217,8 @@ class Product(models.Model):
     stock = models.PositiveIntegerField(default=0)
     
     objects = MyCustomManager() # Use your custom manager
-    # fast_count_querysets can still be used with custom managers
     
+    # fast_count_querysets can still be used with custom managers
     @classmethod
     def fast_count_querysets(cls):
         return [
