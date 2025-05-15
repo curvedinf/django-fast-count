@@ -5,7 +5,9 @@
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/django-fast-count)](https://pypi.org/project/django-fast-count/)
 [![GitHub stars](https://img.shields.io/github/stars/curvedinf/django-fast-count)](https://github.com/curvedinf/django-fast-count/stargazers)
 [![Ko-fi Link](kofi.webp)](https://ko-fi.com/A0A31B6VB6)
+
 A fast [Django](https://djangoproject.com) `.count()` implementation for large tables.
+
 ## The Problem
 For most databases, when a table grows to several million rows, the performance of the default `QuerySet.count()` can degrade significantly. This often becomes the slowest query in a view, sometimes by orders of magnitude. Since the Django admin app uses `.count()` on every list page, this can render the admin unusable for large tables.
 ## The Solution
