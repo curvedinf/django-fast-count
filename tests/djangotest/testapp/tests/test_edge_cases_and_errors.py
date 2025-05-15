@@ -171,11 +171,14 @@ def test_precache_counts_handles_error_for_one_queryset(monkeypatch, capsys):
         and "Error: Simulated DB error for flag=True count" in results[key_true]
     )
     assert results[key_false] == 3
-    assert "Error precaching count for TestModel (manager: objects) queryset" in captured.out # manager name is from qs instance
+    assert (
+        "Error precaching count for TestModel (manager: objects) queryset"
+        in captured.out
+    )  # manager name is from qs instance
     assert "Simulated DB error for flag=True count" in captured.out
 
     model_ct = ContentType.objects.get_for_model(TestModel)
-    manager_name = qs_for_precache.manager_name # Get manager name from the QS instance
+    manager_name = qs_for_precache.manager_name  # Get manager name from the QS instance
 
     assert (
         FastCount.objects.get(
@@ -243,12 +246,10 @@ def test_maybe_trigger_precache_synchronous_mode_success(monkeypatch, capsys):
     monkeypatch.setattr(qs, "precache_counts", mock_precache_counts_instance)
 
     current_time_ts = time.time()
-    with patch(
-        "time.time", return_value=current_time_ts
-    ):
+    with patch("time.time", return_value=current_time_ts):
         qs.maybe_trigger_precache()
 
-    mock_precache_counts_instance.assert_called_once_with() # No manager_name argument
+    mock_precache_counts_instance.assert_called_once_with()  # No manager_name argument
     captured = capsys.readouterr()
     assert (
         f"SYNC_TEST_MODE: Forking disabled. Running precache_counts synchronously for {model_ct} ({manager_name})."
@@ -261,9 +262,7 @@ def test_maybe_trigger_precache_synchronous_mode_success(monkeypatch, capsys):
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=manager_name
     )
-    assert (
-        cache.get(last_run_key) == current_time_ts
-    )
+    assert cache.get(last_run_key) == current_time_ts
     lock_key = qs._precache_lock_key_template.format(
         ct_id=model_ct.id, manager=manager_name
     )
@@ -296,7 +295,7 @@ def test_maybe_trigger_precache_synchronous_mode_error(monkeypatch, capsys):
     with patch("time.time", return_value=current_time_ts):
         qs.maybe_trigger_precache()
 
-    mock_precache_counts_instance.assert_called_once_with() # No manager_name argument
+    mock_precache_counts_instance.assert_called_once_with()  # No manager_name argument
     captured = capsys.readouterr()
     assert "SYNC_TEST_MODE: Forking disabled." in captured.out
     assert (
@@ -306,9 +305,7 @@ def test_maybe_trigger_precache_synchronous_mode_error(monkeypatch, capsys):
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=manager_name
     )
-    assert (
-        cache.get(last_run_key) == initial_last_run_ts
-    )
+    assert cache.get(last_run_key) == initial_last_run_ts
     lock_key = qs._precache_lock_key_template.format(
         ct_id=model_ct.id, manager=manager_name
     )
@@ -374,7 +371,7 @@ def test_maybe_trigger_precache_forking_child_path_success(
         del os.environ[DISABLE_FORK_ENV_VAR]
 
     create_test_models_deterministic(flag_true_count=1)
-    qs = TestModel.objects.all() # Get QS instance first
+    qs = TestModel.objects.all()  # Get QS instance first
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = qs.manager_name
 
@@ -388,7 +385,9 @@ def test_maybe_trigger_precache_forking_child_path_success(
     )
 
     mock_precache_counts_on_instance = MagicMock()
-    monkeypatch.setattr(qs, "precache_counts", mock_precache_counts_on_instance) # Patch on QS instance
+    monkeypatch.setattr(
+        qs, "precache_counts", mock_precache_counts_on_instance
+    )  # Patch on QS instance
 
     mock_os_fork.return_value = 0  # Simulate child process path
     child_pid = 54321
@@ -400,7 +399,7 @@ def test_maybe_trigger_precache_forking_child_path_success(
 
     mock_os_fork.assert_called_once()
     mock_close_all.assert_called_once()
-    mock_precache_counts_on_instance.assert_called_once_with() # No manager_name argument
+    mock_precache_counts_on_instance.assert_called_once_with()  # No manager_name argument
     mock_os_exit.assert_called_once_with(0)
     captured = capsys.readouterr()
     assert (
@@ -434,7 +433,7 @@ def test_maybe_trigger_precache_forking_child_path_error(
         del os.environ[DISABLE_FORK_ENV_VAR]
 
     create_test_models_deterministic(flag_true_count=1)
-    qs = TestModel.objects.all() # Get QS instance first
+    qs = TestModel.objects.all()  # Get QS instance first
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = qs.manager_name
 
@@ -451,7 +450,9 @@ def test_maybe_trigger_precache_forking_child_path_error(
     mock_precache_counts_on_instance = MagicMock(
         side_effect=Exception("Child precache error")
     )
-    monkeypatch.setattr(qs, "precache_counts", mock_precache_counts_on_instance) # Patch on QS instance
+    monkeypatch.setattr(
+        qs, "precache_counts", mock_precache_counts_on_instance
+    )  # Patch on QS instance
 
     mock_os_fork.return_value = 0  # Simulate child process path
     child_pid = 54321
@@ -463,7 +464,7 @@ def test_maybe_trigger_precache_forking_child_path_error(
 
     mock_os_fork.assert_called_once()
     mock_close_all.assert_called_once()
-    mock_precache_counts_on_instance.assert_called_once_with() # No manager_name argument
+    mock_precache_counts_on_instance.assert_called_once_with()  # No manager_name argument
     mock_os_exit.assert_called_once_with(1)
     captured = capsys.readouterr()
     assert (
@@ -503,7 +504,7 @@ def test_precache_command_handles_error_in_manager_precache(monkeypatch, capsys)
     # We need to patch FastCountQuerySet.precache_counts
     original_qs_precache_counts_method = FastCountQuerySet.precache_counts
 
-    def faulty_precache_counts(self_qs): # self_qs is the FastCountQuerySet instance
+    def faulty_precache_counts(self_qs):  # self_qs is the FastCountQuerySet instance
         results = original_qs_precache_counts_method(self_qs)
         if results:
             first_key = list(results.keys())[0]
@@ -519,8 +520,5 @@ def test_precache_command_handles_error_in_manager_precache(monkeypatch, capsys)
     assert "Processing: testapp.TestModel (manager: 'objects')" in captured_out
     # The number of querysets is obtained from the QS instance
     num_querysets = len(TestModel.objects.all().get_precache_querysets())
-    assert (
-        f"Precached counts for {num_querysets} querysets:"
-        in captured_out
-    )
+    assert f"Precached counts for {num_querysets} querysets:" in captured_out
     assert "Simulated Error during precache" in captured_out

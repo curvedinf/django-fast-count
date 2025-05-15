@@ -322,9 +322,7 @@ def test_manager_name_determination_for_default_manager(monkeypatch, capsys):
 
     # Check that the warning about manager name is not printed by manager._get_own_name_on_model
     # This warning happens during get_queryset -> _get_own_name_on_model
-    with patch(
-        "builtins.print"
-    ) as mock_print_builtin:
+    with patch("builtins.print") as mock_print_builtin:
         TestModel.objects.all().count()  # This will trigger get_queryset
         for call_args in mock_print_builtin.call_args_list:
             args, _ = call_args
@@ -346,8 +344,10 @@ def test_get_precache_querysets_handles_misconfigured_instance_method(
     monkeypatch, capsys
 ):
     """Test warning and fallback if fast_count_querysets is an instance method."""
+
     def misconfigured_method(self_param):  # Defined as an instance method
         return [TestModel.objects.filter(flag=True)]
+
     monkeypatch.setattr(TestModel, "fast_count_querysets", misconfigured_method)
 
     manager = TestModel.objects

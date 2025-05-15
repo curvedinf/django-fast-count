@@ -61,7 +61,9 @@ def test_intermediate_initial_count_no_cache():
 def test_intermediate_retroactive_caching(monkeypatch):
     """Test retroactive caching for IntermediateManager."""
     # Default cache_counts_larger_than is 1M, override for test
-    monkeypatch.setattr(ModelWithIntermediateManager.objects, "cache_counts_larger_than", 2)
+    monkeypatch.setattr(
+        ModelWithIntermediateManager.objects, "cache_counts_larger_than", 2
+    )
     create_intermediate_models(count=3)
     model_ct = ContentType.objects.get_for_model(ModelWithIntermediateManager)
     manager_name_expected = "objects"
@@ -84,8 +86,8 @@ def test_intermediate_precache_counts_direct_call():
     create_intermediate_models(count=7)
     manager = ModelWithIntermediateManager.objects
     manager_name_expected = "objects"
-    qs_for_precache = manager.all() # This is an IntermediateFastCountQuerySet
-    assert isinstance(qs_for_precache, FastCountQuerySet) # Check it's our QS
+    qs_for_precache = manager.all()  # This is an IntermediateFastCountQuerySet
+    assert isinstance(qs_for_precache, FastCountQuerySet)  # Check it's our QS
     assert hasattr(qs_for_precache, "precache_counts")
     results = qs_for_precache.precache_counts()
     assert len(results) == 1  # Only .all() from fast_count_querysets
@@ -121,11 +123,15 @@ def test_intermediate_management_command_precache():
 # --- Tests for ModelWithDeepManager ---
 def test_deep_initial_count_no_cache():
     """Test basic counting for DeepManager without caching triggered."""
-    create_deep_models(gt_5_count=2, lte_5_count=3) # Total 5
+    create_deep_models(gt_5_count=2, lte_5_count=3)  # Total 5
     # Default cache_counts_larger_than is 1_000_000 for this manager
     assert ModelWithDeepManager.objects.count() == 5
-    assert ModelWithDeepManager.objects.filter(another_field__gt=5).count() == 2  # (6,7) from gt_5_count=2; (0,1,2) from lte_5_count=3. gt=5 -> 2 items
-    assert ModelWithDeepManager.objects.filter(another_field__lte=5).count() == 3 # lte=5 -> 3 items
+    assert (
+        ModelWithDeepManager.objects.filter(another_field__gt=5).count() == 2
+    )  # (6,7) from gt_5_count=2; (0,1,2) from lte_5_count=3. gt=5 -> 2 items
+    assert (
+        ModelWithDeepManager.objects.filter(another_field__lte=5).count() == 3
+    )  # lte=5 -> 3 items
     assert FastCount.objects.count() == 0
     with patch("django.core.cache.cache.set") as mock_cache_set:
         ModelWithDeepManager.objects.count()
@@ -139,7 +145,9 @@ def test_deep_retroactive_caching_all(monkeypatch):
     create_deep_models(gt_5_count=1, lte_5_count=3)  # Total 4
     model_ct = ContentType.objects.get_for_model(ModelWithDeepManager)
     manager_name_expected = "objects"
-    assert ModelWithDeepManager.objects.count() == 4 # Triggers retroactive cache for .all()
+    assert (
+        ModelWithDeepManager.objects.count() == 4
+    )  # Triggers retroactive cache for .all()
     qs_all = ModelWithDeepManager.objects.all()
     cache_key_all = qs_all._get_cache_key()
     fc_entry_all = FastCount.objects.get(
@@ -186,7 +194,7 @@ def test_deep_precache_counts_direct_call():
     create_deep_models(gt_5_count=4, lte_5_count=6)
     manager = ModelWithDeepManager.objects
     manager_name_expected = "objects"
-    qs_for_precache = manager.all() # This is a DeepFastCountQuerySet
+    qs_for_precache = manager.all()  # This is a DeepFastCountQuerySet
     assert isinstance(qs_for_precache, FastCountQuerySet)
     results = qs_for_precache.precache_counts()
 
@@ -221,7 +229,9 @@ def test_deep_precache_counts_direct_call():
     key_lte5 = qs_lte5._get_cache_key()
     assert results[key_lte5] == 6
     fc_lte5 = FastCount.objects.get(
-        content_type=model_ct, manager_name=manager_name_expected, queryset_hash=key_lte5
+        content_type=model_ct,
+        manager_name=manager_name_expected,
+        queryset_hash=key_lte5,
     )
     assert fc_lte5.count == 6
     assert fc_lte5.is_precached is True
@@ -266,7 +276,9 @@ def test_deep_management_command_precache():
     qs_lte5 = manager.filter(another_field__lte=5)
     key_lte5 = qs_lte5._get_cache_key()
     fc_lte5 = FastCount.objects.get(
-        content_type=model_ct, manager_name=manager_name_expected, queryset_hash=key_lte5
+        content_type=model_ct,
+        manager_name=manager_name_expected,
+        queryset_hash=key_lte5,
     )
     assert fc_lte5.count == 6
     assert fc_lte5.is_precached is True
@@ -280,8 +292,9 @@ def test_intermediate_queryset_type():
     # it should be IntermediateFastCountQuerySet or a subclass thereof.
     # The actual class is IntermediateFastCountQuerySet from managers.py
     from testapp.managers import IntermediateFastCountQuerySet
+
     assert isinstance(qs, IntermediateFastCountQuerySet)
-    assert qs.manager_name == "objects" # check manager_name propagated
+    assert qs.manager_name == "objects"  # check manager_name propagated
 
 
 def test_deep_queryset_type():
@@ -289,5 +302,6 @@ def test_deep_queryset_type():
     qs = ModelWithDeepManager.objects.all()
     # The actual class is DeepFastCountQuerySet from managers.py
     from testapp.managers import DeepFastCountQuerySet
+
     assert isinstance(qs, DeepFastCountQuerySet)
-    assert qs.manager_name == "objects" # check manager_name propagated
+    assert qs.manager_name == "objects"  # check manager_name propagated

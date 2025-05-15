@@ -5,8 +5,10 @@ from django.db import models
 from django_fast_count.managers import FastCountManager
 from .managers import IntermediateFastCountManager, DeepFastCountManager
 
+
 def get_random_boolean():
     return choice([True, False])
+
 
 class TestModel(models.Model):
     uuid = models.UUIDField(default=uuid.uuid4)
@@ -24,6 +26,7 @@ class TestModel(models.Model):
             cls.objects.filter(flag=False),
         ]
 
+
 class ModelWithBadFastCountQuerysets(models.Model):
     objects = FastCountManager()
 
@@ -34,6 +37,7 @@ class ModelWithBadFastCountQuerysets(models.Model):
     class Meta:
         app_label = "testapp"
 
+
 class ModelWithDynamicallyAssignedManager(models.Model):
     some_field = models.BooleanField(default=True)
     # No explicit manager here, tests might assign it dynamically or test fallback
@@ -41,12 +45,14 @@ class ModelWithDynamicallyAssignedManager(models.Model):
     class Meta:
         app_label = "testapp"
 
+
 class AnotherTestModel(models.Model):  # Model without FastCountManager
     name = models.CharField(max_length=100)
     objects = models.Manager()
 
     class Meta:
         app_label = "testapp"
+
 
 class ModelWithSimpleManager(models.Model):  # For manager discovery fallback
     data = models.CharField(max_length=10)
@@ -59,6 +65,7 @@ class ModelWithSimpleManager(models.Model):  # For manager discovery fallback
     class Meta:
         app_label = "testapp"
 
+
 class ModelWithIntermediateManager(models.Model):
     field = models.CharField(max_length=50)
     objects = IntermediateFastCountManager()
@@ -69,6 +76,7 @@ class ModelWithIntermediateManager(models.Model):
 
     class Meta:
         app_label = "testapp"
+
 
 class ModelWithDeepManager(models.Model):
     another_field = models.IntegerField(default=0)

@@ -37,7 +37,9 @@ class Command(BaseCommand):
                         # Get the queryset from the manager instance
                         # The manager_name is already configured into the QS by get_queryset()
                         qs_instance = manager_instance.get_queryset()
-                        results = qs_instance.precache_counts()  # Call precache_counts on the QS
+                        results = (
+                            qs_instance.precache_counts()
+                        )  # Call precache_counts on the QS
 
                         self.stdout.write(
                             f"  Precached counts for {len(results)} querysets:"
@@ -86,7 +88,9 @@ class Command(BaseCommand):
         # Check if there are any expired counts before trying to delete
         # Use exists() for efficiency if just checking, or count() if number needed
         if expired_counts.exists():
-            num_expired, _ = expired_counts.delete()  # delete() returns a tuple (num_deleted, {type: count})
+            num_expired, _ = (
+                expired_counts.delete()
+            )  # delete() returns a tuple (num_deleted, {type: count})
 
         if num_expired > 0:
             self.stdout.write(
