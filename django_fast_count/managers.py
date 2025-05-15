@@ -33,18 +33,18 @@ class FastCountQuerySet(QuerySet):
     """
 
     def __init__(
-            self,
-            model=None,
-            query=None,
-            using=None,
-            hints=None,
-            manager_instance=None,  # New primary way to configure
-            # Direct config/override kwargs:
-            manager_name=None,
-            precache_count_every=None,
-            cache_counts_larger_than=None,
-            expire_cached_counts_after=None,
-            precache_lock_timeout=None,
+        self,
+        model=None,
+        query=None,
+        using=None,
+        hints=None,
+        manager_instance=None,  # New primary way to configure
+        # Direct config/override kwargs:
+        manager_name=None,
+        precache_count_every=None,
+        cache_counts_larger_than=None,
+        expire_cached_counts_after=None,
+        precache_lock_timeout=None,
     ):
         actual_model = model
         actual_using = using
@@ -183,10 +183,8 @@ class FastCountQuerySet(QuerySet):
                     )
             except TypeError as e:
                 if "missing 1 required positional argument" in str(
-                        e
-                ) or "takes 0 positional arguments but 1 was given" in str(
                     e
-                ):
+                ) or "takes 0 positional arguments but 1 was given" in str(e):
                     print(
                         f"Warning: {self.model.__name__}.fast_count_querysets seems to be an instance method "
                         f"(error: {e}). Consider making it a @classmethod or @staticmethod."
@@ -208,15 +206,16 @@ class FastCountQuerySet(QuerySet):
         background process triggered by .count() or a management command.
         """
         from .models import FastCount
+
         if not all(
-                [
-                    self.manager_name,
-                    self.model,
-                    self.precache_count_every,
-                    self.cache_counts_larger_than,
-                    self.expire_cached_counts_after,
-                    self.precache_lock_timeout,
-                ]
+            [
+                self.manager_name,
+                self.model,
+                self.precache_count_every,
+                self.cache_counts_larger_than,
+                self.expire_cached_counts_after,
+                self.precache_lock_timeout,
+            ]
         ):
             print(
                 f"Warning: precache_counts called on a FastCountQuerySet for {getattr(self.model, '__name__', 'UnknownModel')} "
@@ -236,8 +235,8 @@ class FastCountQuerySet(QuerySet):
 
         for qs_to_precache in querysets:
             if (
-                    not hasattr(qs_to_precache, "manager_name")
-                    or not qs_to_precache.manager_name
+                not hasattr(qs_to_precache, "manager_name")
+                or not qs_to_precache.manager_name
             ):
                 print(
                     f"Warning: Skipping a queryset in precache_counts for {self.model.__name__} due to missing manager_name configuration on it."
@@ -287,14 +286,14 @@ class FastCountQuerySet(QuerySet):
         Uses cache locking to prevent multiple triggers for the same model/manager.
         """
         if not all(
-                [
-                    self.manager_name,
-                    self.model,
-                    self.precache_count_every,
-                    self.cache_counts_larger_than,
-                    self.expire_cached_counts_after,
-                    self.precache_lock_timeout,
-                ]
+            [
+                self.manager_name,
+                self.model,
+                self.precache_count_every,
+                self.cache_counts_larger_than,
+                self.expire_cached_counts_after,
+                self.precache_lock_timeout,
+            ]
         ):
             return
 
@@ -313,7 +312,7 @@ class FastCountQuerySet(QuerySet):
         last_run_ts = cache.get(last_run_key)
 
         if last_run_ts and (
-                now_ts < last_run_ts + self.precache_count_every.total_seconds()
+            now_ts < last_run_ts + self.precache_count_every.total_seconds()
         ):
             return
 
@@ -329,8 +328,9 @@ class FastCountQuerySet(QuerySet):
 
         try:
             # Check new and old env var names for synchronous mode
-            force_sync_mode = os.environ.get(FORCE_SYNC_PRECACHE_ENV_VAR) or \
-                              os.environ.get(_DISABLE_FORK_ENV_VAR_OLD_NAME)
+            force_sync_mode = os.environ.get(
+                FORCE_SYNC_PRECACHE_ENV_VAR
+            ) or os.environ.get(_DISABLE_FORK_ENV_VAR_OLD_NAME)
 
             if force_sync_mode:
                 print(
@@ -348,7 +348,9 @@ class FastCountQuerySet(QuerySet):
                         f"SYNC_MODE: Error in synchronous precache_counts for {model_name_for_log} ({manager_name_for_log}): {e}"
                     )
                 if sync_error:
-                    update_last_run_and_release_lock = False  # Don't update last_run if sync failed
+                    update_last_run_and_release_lock = (
+                        False  # Don't update last_run if sync failed
+                    )
             else:  # Background subprocess mode
                 manage_py_path = os.path.join(settings.BASE_DIR, "manage.py")
                 cmd = [sys.executable, manage_py_path, "precache_fast_counts"]
@@ -366,7 +368,7 @@ class FastCountQuerySet(QuerySet):
                         cmd,
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
-                        start_new_session=True  # Detach on POSIX
+                        start_new_session=True,  # Detach on POSIX
                         # For Windows, consider: creationflags=subprocess.DETACHED_PROCESS
                     )
                     print(
@@ -376,7 +378,9 @@ class FastCountQuerySet(QuerySet):
                     print(
                         f"Error launching background precache command for {model_name_for_log} ({manager_name_for_log}): {e}"
                     )
-                    update_last_run_and_release_lock = False  # Don't update last_run if launch failed
+                    update_last_run_and_release_lock = (
+                        False  # Don't update last_run if launch failed
+                    )
         except Exception as e:  # Catch any other unexpected errors in the try block
             print(
                 f"Unexpected error during precache trigger for {model_name_for_log} ({manager_name_for_log}): {e}"
@@ -384,7 +388,9 @@ class FastCountQuerySet(QuerySet):
             update_last_run_and_release_lock = False
         finally:
             if update_last_run_and_release_lock:
-                cache.set(last_run_key, time.time(), None)  # None means persist indefinitely
+                cache.set(
+                    last_run_key, time.time(), None
+                )  # None means persist indefinitely
             cache.delete(lock_key)  # Always release the lock
 
         return  # Parent process returns immediately after launching or sync completion attempt
@@ -398,19 +404,19 @@ class FastCountQuerySet(QuerySet):
         Triggers background precaching if configured and needed.
         """
         from .models import FastCount
+
         if not all(
-                [
-                    hasattr(self, "manager_name")
-                    and self.manager_name,
-                    hasattr(self, "precache_count_every")
-                    and self.precache_count_every is not None,
-                    hasattr(self, "cache_counts_larger_than")
-                    and self.cache_counts_larger_than is not None,
-                    hasattr(self, "expire_cached_counts_after")
-                    and self.expire_cached_counts_after is not None,
-                    hasattr(self, "precache_lock_timeout")
-                    and self.precache_lock_timeout is not None,
-                ]
+            [
+                hasattr(self, "manager_name") and self.manager_name,
+                hasattr(self, "precache_count_every")
+                and self.precache_count_every is not None,
+                hasattr(self, "cache_counts_larger_than")
+                and self.cache_counts_larger_than is not None,
+                hasattr(self, "expire_cached_counts_after")
+                and self.expire_cached_counts_after is not None,
+                hasattr(self, "precache_lock_timeout")
+                and self.precache_lock_timeout is not None,
+            ]
         ):
             print(
                 f"Warning: FastCountQuerySet for {self.model.__name__} is missing configuration. Falling back to standard count."
@@ -484,13 +490,13 @@ class FastCountManager(Manager):
     """
 
     def __init__(
-            self,
-            precache_count_every=None,
-            cache_counts_larger_than=None,
-            expire_cached_counts_after=None,
-            precache_lock_timeout=None,
-            *args,
-            **kwargs,
+        self,
+        precache_count_every=None,
+        cache_counts_larger_than=None,
+        expire_cached_counts_after=None,
+        precache_lock_timeout=None,
+        *args,
+        **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.precache_count_every = (
@@ -524,7 +530,7 @@ class FastCountManager(Manager):
                 if attr is self:
                     return name
             if hasattr(self.model, "_meta") and hasattr(
-                    self.model._meta, "managers_map"
+                self.model._meta, "managers_map"
             ):
                 for name, mgr_instance in self.model._meta.managers_map.items():
                     if mgr_instance is self:

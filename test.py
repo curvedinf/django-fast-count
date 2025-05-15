@@ -3,6 +3,7 @@ import os
 import sys
 import subprocess
 
+
 def main():
     # Determine paths
     # The script itself is in the project root.
@@ -40,7 +41,7 @@ def main():
         "pytest",
         "--cov=django_fast_count",  # Measure coverage for the django_fast_count package (in src/)
         f"--cov-report=html:{coverage_report_dir}",  # Generate HTML report in project_root/htmlcov
-        "--cov-report=term-missing", # Print a summary of missing lines to the terminal
+        "--cov-report=term-missing",  # Print a summary of missing lines to the terminal
     ]
     # Append any arguments received by this script to pytest
     command = command_base + sys.argv[1:]
@@ -61,6 +62,7 @@ def main():
 
     # Exit with the same return code as pytest
     sys.exit(process.returncode)
+
 
 if __name__ == "__main__":
     main()
