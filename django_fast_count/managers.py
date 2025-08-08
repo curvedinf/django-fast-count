@@ -400,7 +400,7 @@ class FastCountQuerySet(QuerySet):
         Retroactively caches large counts.
         Triggers background precaching if configured and needed.
         """
-        from .models import FastCount
+        from django_fast_count.models import FastCount
 
         if not all(
             [
