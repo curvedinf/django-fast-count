@@ -325,9 +325,7 @@ class FastCountQuerySet(QuerySet):
 
         try:
             # Check new and old env var names for synchronous mode
-            force_sync_mode = os.environ.get(
-                FORCE_SYNC_PRECACHE_ENV_VAR
-            )
+            force_sync_mode = os.environ.get(FORCE_SYNC_PRECACHE_ENV_VAR)
 
             if force_sync_mode:
                 print(

@@ -10,7 +10,7 @@ README = (HERE / "README.md").read_text()
 
 setup(
     name="django-fast-count",
-    version="0.1.7",
+    version="0.1.9",
     description="A fast Django .count() implementation for large tables.",
     long_description=README,
     long_description_content_type="text/markdown",
@@ -22,11 +22,6 @@ setup(
     install_requires=[
         "django>=3.2",
     ],
-    entry_points={
-        "console_scripts": [
-            "dir-assistant=dir_assistant.main:main",
-        ],
-    },
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

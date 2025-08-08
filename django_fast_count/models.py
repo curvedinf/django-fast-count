@@ -7,6 +7,9 @@ class FastCount(models.Model):
     Stores cached counts for specific model querysets.
     """
 
+    id = models.BigAutoField(
+        primary_key=True
+    )  # Explicit so project settings do not override
     content_type = models.ForeignKey(
         ContentType,
         on_delete=models.CASCADE,
