@@ -8,7 +8,7 @@ class FastCount(models.Model):
     """
 
     id = models.BigAutoField(
-        primary_key=True
+        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
     )  # Explicit so project settings do not override
     content_type = models.ForeignKey(
         ContentType,
