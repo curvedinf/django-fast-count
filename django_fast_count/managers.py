@@ -3,9 +3,9 @@ import os
 import time
 import subprocess  # New import
 import sys  # New import
+from pathlib import Path
 from datetime import timedelta
 from django.core.cache import cache
-from django.db import connections
 from django.db.models import Manager
 from django.db.models.query import QuerySet
 from django.utils import timezone
@@ -16,7 +16,7 @@ from django.conf import settings  # New import for settings.BASE_DIR
 # from .models import FastCount
 DEFAULT_PRECACHE_COUNT_EVERY = timedelta(minutes=10)
 DEFAULT_CACHE_COUNTS_LARGER_THAN = 1_000_000
-DEFAULT_EXPIRE_CACHED_COUNTS_AFTER = timedelta(minutes=10)
+DEFAULT_EXPIRE_CACHED_COUNTS_AFTER = timedelta(minutes=20)
 
 # Environment variable to disable forking/background processing and force synchronous execution.
 FORCE_SYNC_PRECACHE_ENV_VAR = "DJANGO_FAST_COUNT_FORCE_SYNC_PRECACHE"
