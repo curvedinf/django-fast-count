@@ -15,8 +15,7 @@ from django_fast_count.models import FastCount
 from django_fast_count.managers import (
     FastCountManager,
     FastCountQuerySet,
-    FORCE_SYNC_PRECACHE_ENV_VAR,  # Updated env var name
-    _DISABLE_FORK_ENV_VAR_OLD_NAME,  # For checking backward compatibility
+    FORCE_SYNC_PRECACHE_ENV_VAR,
 )
 from testapp.models import (
     ModelWithBadFastCountQuerysets,
@@ -25,11 +24,8 @@ from testapp.models import (
     ModelWithSimpleManager,
     TestModel,
 )
-
 # Pytest marker for DB access for all tests in this module
 pytestmark = pytest.mark.django_db
-
-
 @pytest.fixture(autouse=True)
 def clean_state_for_edge_cases(settings):
     """Ensures a clean state for each test in this file."""
@@ -43,7 +39,6 @@ def clean_state_for_edge_cases(settings):
     # Store original BASE_DIR and environment variables
     original_base_dir = getattr(settings, "BASE_DIR", None)
     original_sync_setting = os.environ.pop(FORCE_SYNC_PRECACHE_ENV_VAR, None)
-    original_sync_setting_old = os.environ.pop(_DISABLE_FORK_ENV_VAR_OLD_NAME, None)
     # Set BASE_DIR for tests that might need it (e.g., subprocess calls to manage.py)
     # Use a sensible default like the current working directory if not already set,
     # or a specific path if your test setup requires it.
@@ -68,14 +63,6 @@ def clean_state_for_edge_cases(settings):
         os.environ[FORCE_SYNC_PRECACHE_ENV_VAR] = original_sync_setting
     elif FORCE_SYNC_PRECACHE_ENV_VAR in os.environ:  # if set by test but not originally
         del os.environ[FORCE_SYNC_PRECACHE_ENV_VAR]
-    if original_sync_setting_old is not None:
-        os.environ[_DISABLE_FORK_ENV_VAR_OLD_NAME] = original_sync_setting_old
-    elif (
-        _DISABLE_FORK_ENV_VAR_OLD_NAME in os.environ
-    ):  # if set by test but not originally
-        del os.environ[_DISABLE_FORK_ENV_VAR_OLD_NAME]
-
-
 def create_test_models_deterministic(flag_true_count=0, flag_false_count=0):
     """Helper to create TestModel instances with specific flag counts."""
     TestModel.objects.bulk_create(
@@ -85,8 +72,6 @@ def create_test_models_deterministic(flag_true_count=0, flag_false_count=0):
         [TestModel(flag=False) for _ in range(flag_false_count)]
     )
     return flag_true_count + flag_false_count
-
-
 def test_fast_count_model_str_representation():
     create_test_models_deterministic(flag_true_count=1)
     model_instance = TestModel.objects.first()
@@ -100,8 +85,6 @@ def test_fast_count_model_str_representation():
     )
     expected_str = f"{ct} (objects) [12345678...]"
     assert str(fc_entry) == expected_str
-
-
 def test_get_cache_key_fallback_on_sql_error(capsys):
     qs = TestModel.objects.all()
     with patch.object(
@@ -115,8 +98,6 @@ def test_get_cache_key_fallback_on_sql_error(capsys):
         in captured.out
     )
     assert "SQL generation failed" in captured.out
-
-
 def test_get_precache_querysets_handles_bad_return_type(capsys):
     qs = ModelWithBadFastCountQuerysets.objects.all()
     ContentType.objects.get_for_model(
@@ -136,13 +117,10 @@ def test_get_precache_querysets_handles_bad_return_type(capsys):
         f"{ModelWithBadFastCountQuerysets.__name__}.fast_count_querysets did not return a list or tuple."
         in captured.out
     )
-
-
 def test_precache_counts_handles_error_for_one_queryset(monkeypatch, capsys):
     create_test_models_deterministic(flag_true_count=2, flag_false_count=3)
     qs_for_precache = TestModel.objects.all()  # Get a QS instance
     original_qs_count = django_models.QuerySet.count  # Unbound method
-
     def mock_qs_count_for_error(self_qs):
         if not isinstance(self_qs, django_models.QuerySet):
             raise TypeError(f"Expected QuerySet, got {type(self_qs)}")
@@ -162,43 +140,36 @@ def test_precache_counts_handles_error_for_one_queryset(monkeypatch, capsys):
                         and hasattr(child_node.lhs.lhs.target, "name")
                     ):
                         lookup_field_name = child_node.lhs.lhs.target.name
-
                     if lookup_field_name == "flag" and child_node.rhs is True:
                         is_flag_true_filter = True
                         break
         if is_flag_true_filter:
             raise Exception("Simulated DB error for flag=True count")
         return original_qs_count(self_qs)
-
     with patch(
         "django.db.models.query.QuerySet.count",
         autospec=True,
         side_effect=mock_qs_count_for_error,
     ):
         results = qs_for_precache.precache_counts()
-
     captured = capsys.readouterr()
     qs_all = TestModel.objects.all()
     qs_true = TestModel.objects.filter(flag=True)
     qs_false = TestModel.objects.filter(flag=False)
-
     key_all = qs_all._get_cache_key()
     key_true = qs_true._get_cache_key()
     key_false = qs_false._get_cache_key()
-
     assert results[key_all] == 5
     assert (
         isinstance(results[key_true], str)
         and "Error: Simulated DB error for flag=True count" in results[key_true]
     )
     assert results[key_false] == 3
-
     assert (
         f"Error precaching count for {TestModel.__name__} (manager: objects) queryset"
         in captured.out
     )  # manager name is from qs instance
     assert "Simulated DB error for flag=True count" in captured.out
-
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = qs_for_precache.manager_name  # Get manager name from the QS instance
     assert (
@@ -216,15 +187,12 @@ def test_precache_counts_handles_error_for_one_queryset(monkeypatch, capsys):
         ).count
         == 3
     )
-
-
 def test_maybe_trigger_precache_lock_not_acquired(monkeypatch, capsys):
     create_test_models_deterministic(flag_true_count=1)
     qs = TestModel.objects.all()
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = qs.manager_name
     model_name = qs.model.__name__
-
     monkeypatch.setattr(qs, "precache_count_every", timedelta(seconds=1))
     # Ensure last_run_key is old enough to trigger
     cache.set(
@@ -234,20 +202,16 @@ def test_maybe_trigger_precache_lock_not_acquired(monkeypatch, capsys):
         time.time() - qs.precache_count_every.total_seconds() * 2,
         timeout=None,
     )
-
     with patch(
         "django.core.cache.cache.add", return_value=False
     ) as mock_cache_add:  # Simulate lock not acquired
         qs.maybe_trigger_precache()
-
     mock_cache_add.assert_called_once()
     captured = capsys.readouterr()
     assert (
         f"Precache lock {qs._precache_lock_key_template.format(ct_id=model_ct.id, manager=manager_name)} not acquired for {model_name} ({manager_name}). Process already running or recently finished/failed."
         in captured.out
     )
-
-
 def test_maybe_trigger_precache_synchronous_mode_success(monkeypatch, capsys, settings):
     os.environ[FORCE_SYNC_PRECACHE_ENV_VAR] = "1"
     create_test_models_deterministic(flag_true_count=1)
@@ -255,7 +219,6 @@ def test_maybe_trigger_precache_synchronous_mode_success(monkeypatch, capsys, se
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = qs.manager_name
     model_name = qs.model.__name__
-
     monkeypatch.setattr(qs, "precache_count_every", timedelta(seconds=1))
     initial_last_run_ts = time.time() - qs.precache_count_every.total_seconds() * 2
     cache.set(
@@ -265,14 +228,11 @@ def test_maybe_trigger_precache_synchronous_mode_success(monkeypatch, capsys, se
         initial_last_run_ts,
         timeout=None,
     )
-
     mock_precache_counts_instance = MagicMock()
     monkeypatch.setattr(qs, "precache_counts", mock_precache_counts_instance)
-
     current_time_ts = time.time()
     with patch("time.time", return_value=current_time_ts):
         qs.maybe_trigger_precache()  # This will access settings.BASE_DIR if not sync (but it is)
-
     mock_precache_counts_instance.assert_called_once_with()
     captured = capsys.readouterr()
     assert (
@@ -283,7 +243,6 @@ def test_maybe_trigger_precache_synchronous_mode_success(monkeypatch, capsys, se
         f"SYNC_MODE: precache_counts finished synchronously for {model_name} ({manager_name})."
         in captured.out
     )
-
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=manager_name
     )
@@ -292,8 +251,6 @@ def test_maybe_trigger_precache_synchronous_mode_success(monkeypatch, capsys, se
         ct_id=model_ct.id, manager=manager_name
     )
     assert cache.get(lock_key) is None
-
-
 def test_maybe_trigger_precache_synchronous_mode_error(monkeypatch, capsys, settings):
     os.environ[FORCE_SYNC_PRECACHE_ENV_VAR] = "1"
     create_test_models_deterministic(flag_true_count=1)
@@ -301,7 +258,6 @@ def test_maybe_trigger_precache_synchronous_mode_error(monkeypatch, capsys, sett
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = qs.manager_name
     model_name = qs.model.__name__
-
     monkeypatch.setattr(qs, "precache_count_every", timedelta(seconds=1))
     initial_last_run_ts = time.time() - qs.precache_count_every.total_seconds() * 2
     cache.set(
@@ -311,16 +267,13 @@ def test_maybe_trigger_precache_synchronous_mode_error(monkeypatch, capsys, sett
         initial_last_run_ts,
         timeout=None,
     )
-
     mock_precache_counts_instance = MagicMock(
         side_effect=Exception("Sync precache error")
     )
     monkeypatch.setattr(qs, "precache_counts", mock_precache_counts_instance)
-
     current_time_ts = time.time()
     with patch("time.time", return_value=current_time_ts):
         qs.maybe_trigger_precache()  # Accesses settings.BASE_DIR if not sync (but it is)
-
     mock_precache_counts_instance.assert_called_once_with()
     captured = capsys.readouterr()
     assert "SYNC_MODE: Running precache_counts synchronously" in captured.out
@@ -328,7 +281,6 @@ def test_maybe_trigger_precache_synchronous_mode_error(monkeypatch, capsys, sett
         f"SYNC_MODE: Error in synchronous precache_counts for {model_name} ({manager_name}): Sync precache error"
         in captured.out
     )
-
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=manager_name
     )
@@ -339,8 +291,6 @@ def test_maybe_trigger_precache_synchronous_mode_error(monkeypatch, capsys, sett
         ct_id=model_ct.id, manager=manager_name
     )
     assert cache.get(lock_key) is None
-
-
 @patch("subprocess.Popen")
 @patch("time.time")
 def test_maybe_trigger_precache_subprocess_launch_success(
@@ -349,18 +299,12 @@ def test_maybe_trigger_precache_subprocess_launch_success(
     # settings.BASE_DIR is set by the fixture
     initial_fixed_ts = 1678880000.0
     mock_time.return_value = initial_fixed_ts
-
     os.environ.pop(FORCE_SYNC_PRECACHE_ENV_VAR, None)  # Ensure not in sync mode
-    os.environ.pop(
-        _DISABLE_FORK_ENV_VAR_OLD_NAME, None
-    )  # Ensure old var also not in sync mode
-
     create_test_models_deterministic(flag_true_count=1)
     qs = TestModel.objects.all()
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = qs.manager_name
     model_name = qs.model.__name__
-
     monkeypatch.setattr(qs, "precache_count_every", timedelta(seconds=1))
     cache.set(
         qs._precache_last_run_key_template.format(
@@ -369,16 +313,12 @@ def test_maybe_trigger_precache_subprocess_launch_success(
         0,  # Ensure it's due to run
         timeout=None,
     )
-
     mock_process = MagicMock()
     mock_process.pid = 12345
     mock_subprocess_popen.return_value = mock_process
-
     current_ts_for_logic = 1678886400.0
     mock_time.return_value = current_ts_for_logic
-
     qs.maybe_trigger_precache()
-
     expected_manage_py_path = os.path.join(settings.BASE_DIR, "manage.py")
     expected_cmd = [sys.executable, expected_manage_py_path, "precache_fast_counts"]
     mock_subprocess_popen.assert_called_once_with(
@@ -396,7 +336,6 @@ def test_maybe_trigger_precache_subprocess_launch_success(
         f"Attempting to launch background precache command for {model_name} ({manager_name})."
         in captured.out
     )
-
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=manager_name
     )
@@ -405,8 +344,6 @@ def test_maybe_trigger_precache_subprocess_launch_success(
         ct_id=model_ct.id, manager=manager_name
     )
     assert cache.get(lock_key) is None
-
-
 @patch("time.time")
 @patch("subprocess.Popen")
 def test_maybe_trigger_precache_subprocess_launch_error(
@@ -415,28 +352,21 @@ def test_maybe_trigger_precache_subprocess_launch_error(
     # settings.BASE_DIR is set by the fixture
     initial_fixed_ts = 1678880000.0
     mock_time.return_value = initial_fixed_ts
-
     os.environ.pop(FORCE_SYNC_PRECACHE_ENV_VAR, None)
-    os.environ.pop(_DISABLE_FORK_ENV_VAR_OLD_NAME, None)
-
     create_test_models_deterministic(flag_true_count=1)
     qs = TestModel.objects.all()
     model_ct = ContentType.objects.get_for_model(TestModel)
     manager_name = qs.manager_name
     model_name = qs.model.__name__
-
     monkeypatch.setattr(qs, "precache_count_every", timedelta(seconds=1))
     original_last_run_time_value = 0
     last_run_key = qs._precache_last_run_key_template.format(
         ct_id=model_ct.id, manager=manager_name
     )
     cache.set(last_run_key, original_last_run_time_value, timeout=None)
-
     mock_subprocess_popen.side_effect = Exception("Subprocess launch failed")
-
     current_ts_for_logic = 1678886400.0  # This time won't be set for last_run_key
     mock_time.return_value = current_ts_for_logic
-
     qs.maybe_trigger_precache()
     mock_subprocess_popen.assert_called_once()
     captured = capsys.readouterr()
@@ -449,8 +379,6 @@ def test_maybe_trigger_precache_subprocess_launch_error(
         ct_id=model_ct.id, manager=manager_name
     )
     assert cache.get(lock_key) is None
-
-
 def test_precache_command_no_fastcount_managers(capsys):
     ContentType.objects.get_for_model(AnotherTestModel)
     AnotherTestModel.objects.create(name="test")
@@ -461,19 +389,15 @@ def test_precache_command_no_fastcount_managers(capsys):
         "No models found using FastCountManager. No counts were precached."
         in captured.out
     )
-
-
 def test_precache_command_handles_error_in_manager_precache(monkeypatch, capsys):
     create_test_models_deterministic(flag_true_count=1)
     original_qs_precache_counts_method = FastCountQuerySet.precache_counts
-
     def faulty_precache_counts(self_qs):  # self_qs is the FastCountQuerySet instance
         results = original_qs_precache_counts_method(self_qs)
         if results:  # Make sure results is not empty
             first_key = list(results.keys())[0]
             results[first_key] = "Simulated Error during precache"
         return results
-
     monkeypatch.setattr(FastCountQuerySet, "precache_counts", faulty_precache_counts)
     stdout_capture = StringIO()
     call_command("precache_fast_counts", stdout=stdout_capture)
@@ -485,7 +409,6 @@ def test_precache_command_handles_error_in_manager_precache(monkeypatch, capsys)
     num_querysets = len(TestModel.objects.all().get_precache_querysets())
     assert f"Precached counts for {num_querysets} querysets:" in captured_out
     assert "Simulated Error during precache" in captured_out
-
 def test_maybe_trigger_precache_disabled_by_manager_flag(monkeypatch):
     """
     Tests that maybe_trigger_precache is a no-op when disable_forked_precaching=True.
@@ -498,9 +421,7 @@ def test_maybe_trigger_precache_disabled_by_manager_flag(monkeypatch):
         precache_count_every=timedelta(seconds=1),
     )
     monkeypatch.setattr(TestModel, "objects", new_manager)
-
     create_test_models_deterministic(flag_true_count=1)
-
     # Manually set the last run time to be in the past to ensure the
     # precache condition is met.
     configured_qs = TestModel.objects.all()
@@ -510,7 +431,6 @@ def test_maybe_trigger_precache_disabled_by_manager_flag(monkeypatch):
         ct_id=model_ct.id, manager=manager_name
     )
     cache.set(last_run_key, time.time() - 2, timeout=None)
-
     # The key check is to see if `cache.add` is called for locking.
     # If disable_forked_precaching works, maybe_trigger_precache returns early,
     # and cache.add is never called.

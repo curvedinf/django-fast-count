@@ -312,7 +312,6 @@ class FastCountQuerySet(QuerySet):
             return
         update_last_run_and_release_lock = True  # Assume success by default
         try:
-            # Check new and old env var names for synchronous mode
             force_sync_mode = os.environ.get(FORCE_SYNC_PRECACHE_ENV_VAR)
             if force_sync_mode:
                 print(
@@ -342,8 +341,7 @@ class FastCountQuerySet(QuerySet):
                 #             "--manager", self.manager_name])
                 print(
                     f"Attempting to launch background precache command for {model_name_for_log} ({manager_name_for_log}). "
-                    f"Cmd: \"{' '.join(cmd)}\""
-                )
+                    f"Cmd: \"{' '.join(cmd)}\"")
                 try:
                     process = subprocess.Popen(
                         cmd,
