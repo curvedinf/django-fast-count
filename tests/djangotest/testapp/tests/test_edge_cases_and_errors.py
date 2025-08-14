@@ -485,3 +485,36 @@ def test_precache_command_handles_error_in_manager_precache(monkeypatch, capsys)
     num_querysets = len(TestModel.objects.all().get_precache_querysets())
     assert f"Precached counts for {num_querysets} querysets:" in captured_out
     assert "Simulated Error during precache" in captured_out
+
+def test_maybe_trigger_precache_disabled_by_manager_flag(monkeypatch):
+    """
+    Tests that maybe_trigger_precache is a no-op when disable_forked_precaching=True.
+    """
+    # Replace the manager on TestModel with one that has the flag enabled.
+    # We also set a very short precache_count_every to ensure the trigger
+    # logic would normally fire.
+    new_manager = FastCountManager(
+        disable_forked_precaching=True,
+        precache_count_every=timedelta(seconds=1),
+    )
+    monkeypatch.setattr(TestModel, "objects", new_manager)
+
+    create_test_models_deterministic(flag_true_count=1)
+
+    # Manually set the last run time to be in the past to ensure the
+    # precache condition is met.
+    configured_qs = TestModel.objects.all()
+    model_ct = ContentType.objects.get_for_model(TestModel)
+    manager_name = configured_qs.manager_name
+    last_run_key = configured_qs._precache_last_run_key_template.format(
+        ct_id=model_ct.id, manager=manager_name
+    )
+    cache.set(last_run_key, time.time() - 2, timeout=None)
+
+    # The key check is to see if `cache.add` is called for locking.
+    # If disable_forked_precaching works, maybe_trigger_precache returns early,
+    # and cache.add is never called.
+    with patch("django.core.cache.cache.add") as mock_cache_add:
+        # Calling .count() will invoke maybe_trigger_precache.
+        TestModel.objects.count()
+        mock_cache_add.assert_not_called()
