@@ -420,6 +420,7 @@ def test_maybe_trigger_precache_disabled_by_manager_flag(monkeypatch):
         disable_forked_precaching=True,
         precache_count_every=timedelta(seconds=1),
     )
+    new_manager.model = TestModel
     monkeypatch.setattr(TestModel, "objects", new_manager)
     create_test_models_deterministic(flag_true_count=1)
     # Manually set the last run time to be in the past to ensure the
@@ -438,3 +439,4 @@ def test_maybe_trigger_precache_disabled_by_manager_flag(monkeypatch):
         # Calling .count() will invoke maybe_trigger_precache.
         TestModel.objects.count()
         mock_cache_add.assert_not_called()
+
