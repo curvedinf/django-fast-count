@@ -510,7 +510,7 @@ class FastCountManager(Manager):
             else "UnknownModel"
         )
         print(
-            f"Warning: Could not determine manager name for {model_name_str} (manager instance: {self}). Falling back to 'objects'."
+            f"Warning: Could not determine manager name for {model_name_str} (manager instance: {repr(self)}). Falling back to 'objects'."
         )
         return "objects"
     def get_queryset(self):
